@@ -1,0 +1,116 @@
+name: 部署 Hub 服务到生产环境
+
+# 只有合并到 main 才部署。dev 上的日常提交不触发，
+# 这样 main 代表「已确认要上线的状态」。
+on:
+  push:
+    branches: [main]
+  # 允许在 Actions 页面手动触发：用于重试失败的部署，或不改代码重新部署当前 main
+  workflow_dispatch:
+
+# 同一时刻只允许一个部署运行，避免两次部署交错导致容器状态混乱。
+# 不取消进行中的部署 —— 中途打断可能留下半完成状态。
+concurrency:
+  group: deploy-yado-hub
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # 推送镜像到 GHCR 所需
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 准备 buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN 由 Actions 自动注入，无需手工配置
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 服务器是 amd64，本机开发是 arm64 Mac，所以必须显式指定平台。
+      # 镜像名必须全小写 —— GHCR 不接受大写，因此不能直接用 ${{ github.repository }}
+      # （其值为 YadOwO/yado_hub）。
+      # 类型检查由 Dockerfile 中的 pnpm build（即 tsc）承担，构建失败即等于类型不过，
+      # 无需再单独跑一次 typecheck。
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/yadowo/yado_hub:latest
+            ghcr.io/yadowo/yado_hub:${{ github.sha }}
+          # 复用 Actions 缓存，依赖层未变时可省去重装 node_modules 的时间
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 服务器上那把公钥在 authorized_keys 里被 forced command 限制为
+      # 只能执行 /opt/yado/scripts/deploy-yado-hub.sh，因此这里传什么命令都会被忽略，
+      # 写 true 仅作占位。部署脚本的输出与退出码会原样返回，失败时本步骤即失败。
+      - name: 触发服务器部署
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          # 地址与主机公钥都不是秘密（IP 可从 DNS 查到），写在此处便于换机器时一处修改。
+          DEPLOY_HOST: 8.163.21.152
+          DEPLOY_HOST_KEY: 8.163.21.152 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDKbBzF0ynrtwRHKNsekYVMLHNnT7yTiNZpyaig0WzP6
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # 固定主机公钥而非用 StrictHostKeyChecking=no，避免中间人攻击
+          echo "$DEPLOY_HOST_KEY" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key "yado@$DEPLOY_HOST" true
+
+      # 成功时 SSH 已等待容器健康检查通过；构建、推送或部署失败也会走到这里。
+      # 取消运行不发送通知。通知渠道故障不得改变部署本身的结果。
+      - name: Bark 通知部署结果
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          BARK_DEVICE_KEY: ${{ secrets.BARK_DEVICE_KEY }}
+          DEPLOY_STATUS: ${{ job.status }}
+        run: |
+          if [ -z "$BARK_DEVICE_KEY" ]; then
+            echo "::warning::未配置 BARK_DEVICE_KEY，跳过 Bark 部署通知。"
+            exit 0
+          fi
+
+          if [ "$DEPLOY_STATUS" = "success" ]; then
+            TITLE="✅ yado_hub 生产部署成功"
+            DETAIL="服务器部署完成，容器健康检查通过。"
+          else
+            TITLE="❌ yado_hub 生产部署失败"
+            DETAIL="构建、镜像推送或服务器部署失败，请查看部署日志。"
+          fi
+
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+          BODY="$(printf '%s\n分支：%s\n提交：%s\n执行者：%s' "$DETAIL" "$GITHUB_REF_NAME" "${GITHUB_SHA:0:7}" "$GITHUB_ACTOR")"
+          # jq 负责 JSON 转义；Key 只经请求正文发送，不输出到日志。
+          PAYLOAD="$(jq -n \
+            --arg device_key "$BARK_DEVICE_KEY" \
+            --arg title "$TITLE" \
+            --arg body "$BODY" \
+            --arg url "$RUN_URL" \
+            '{device_key: $device_key, title: $title, body: $body, group: "yado_hub 部署", url: $url}')"
+
+          RESPONSE="$(curl --fail --silent --show-error \
+            --connect-timeout 5 --max-time 15 \
+            --header 'Content-Type: application/json' \
+            --data-binary "$PAYLOAD" \
+            https://api.day.app/push)"
+          if ! printf '%s' "$RESPONSE" | jq -e '.code == 200' > /dev/null; then
+            echo "::warning::Bark 未确认通知发送成功，请检查设备 Key 与通知服务。"
+            exit 1
+          fi
+          echo "已将部署结果发送到 Bark。"

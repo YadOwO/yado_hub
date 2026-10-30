@@ -1,0 +1,16 @@
+node_modules/
+dist/
+
+# 环境变量（含密钥，不得提交）
+.env
+.env.local
+.env.*.local
+# 日志
+*.log
+pnpm-debug.log*
+
+# 系统与编辑器
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

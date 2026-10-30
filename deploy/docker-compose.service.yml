@@ -1,0 +1,29 @@
+# 追加到服务器 /opt/yado/docker-compose.yml 的 services 下（与 yadoa-be、yado-ai 平级）。
+# 本文件只是片段，不能单独 docker compose up。
+
+  yado-hub:
+    # 镜像由 GitHub Actions 构建为 linux/amd64 并推送到 GHCR，
+    # 合并到 main 后自动部署（.github/workflows/deploy.yml）。
+    # 回滚：把下面这行改为 ghcr.io/yadowo/yado_hub:<commit sha>，再执行 docker compose up -d yado-hub。
+    image: ghcr.io/yadowo/yado_hub:latest
+    env_file: ./yado-hub/.env
+    # 反馈数据在 postgres 的 yado_hub schema 中
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7791/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # 机器内存有限：V8 堆已在镜像中限制为 96 MB，这里再兜底限制整个容器，避免异常时挤占 Logto
+    mem_limit: 160m
+    # 不映射端口：仅经 nginx 反代对外提供服务，7791 不暴露公网
+    networks: [yado-net]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
