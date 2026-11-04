@@ -18,7 +18,17 @@ import { createApp } from './shared/openapi.js';
 /** 服务主应用，统一装配跨域、错误处理与各功能路由 */
 const app = createApp();
 
-app.use('*', logger());
+const requestLogger = logger();
+// Mac 上的 agentd 每分钟来问一次指令，成功的请求不记日志，免得把其他日志挤掉；出错的照记
+app.use('*', async (c, next) => {
+  if (!c.req.path.startsWith('/v1/agents/')) {
+    return requestLogger(c, next);
+  }
+  await next();
+  if (c.res.status >= 400) {
+    console.log(`--> ${c.req.method} ${c.req.path} ${c.res.status}`);
+  }
+});
 app.use(
   '*',
   cors({

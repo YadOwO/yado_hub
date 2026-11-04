@@ -150,7 +150,7 @@ export type AgentCommandStatus = (typeof AGENT_COMMAND_STATUSES)[number];
 /**
  * 跑 agent 的机器（目前是一台 Mac 上的 agentd）。
  *
- * agentd 每 5 秒同步一次，state 整体替换为最新快照：健康状态、全局设置、可选模型、流程类型、实例、待办。
+ * agentd 每次同步时 state 整体替换为最新快照：健康状态、全局设置、可选模型、流程类型、实例、待办。
  * 快照的结构由 modules/agents/schemas.ts 校验后写入，读出时再校验一次，版本对不上时按空快照处理。
  */
 export const agentMachines = yadoHubSchema.table('agent_machines', {

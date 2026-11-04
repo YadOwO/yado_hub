@@ -229,6 +229,11 @@ export const AgentSyncResponseSchema = z
   })
   .openapi('AgentSyncResponse');
 
+/** 问指令的响应 */
+export const AgentCheckResponseSchema = z
+  .object({ hasCommands: z.boolean().openapi({ description: '有待执行的指令；为 true 时 agentd 马上同步取走' }) })
+  .openapi('AgentCheckResponse');
+
 // ---- 指令 ----
 
 /** 实例 ID、运行 ID */
@@ -302,6 +307,8 @@ export const AgentCommandInputSchema = z
       type: z.literal('inbox.resolve'),
       payload: z.object({ itemId: IdSchema, action: z.enum(['wontfix', 'done']) }).strict(),
     }),
+    // 让 Mac 马上把最新状态传上来；Mac 平时一小时才完整同步一次
+    z.object({ type: z.literal('sync.now'), payload: z.object({}).strict() }),
   ])
   .openapi('AgentCommandInput');
 
@@ -334,8 +341,8 @@ export const AgentMachineSchema = z
   .object({
     id: z.string(),
     agentdVersion: z.string(),
-    isOnline: z.boolean().openapi({ description: '最近 30 秒内同步过' }),
-    lastSeenAt: z.string(),
+    isOnline: z.boolean().openapi({ description: '最近 3 分钟内联系过 hub（问指令或同步）' }),
+    lastSeenAt: z.string().openapi({ description: '最近一次上传数据的时间；页面上的实例、待办都是这个时刻的状态' }),
     health: AgentHealthSchema.nullable(),
     settings: AgentSettingsSchema.nullable(),
     models: z.array(z.string()),

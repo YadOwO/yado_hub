@@ -1,7 +1,8 @@
 /**
  * agent 管理的数据读写。
  *
- * - 同步：agentd 每 5 秒上传一次快照与新事件，hub 存下后回报已收到的位置，并把待发的指令交给它。
+ * - 同步：agentd 每分钟问一次有没有指令（只读，不写库）；有指令、本地有新事件，或距上次同步满一小时时，
+ *   上传快照与新事件，hub 存下后回报已收到的位置，并把待发的指令交给它。
  * - 管理端：总览、运行列表与详情、发指令、查指令结果。
  *
  * hub 不参与流程执行，只是 agentd 状态的镜像和指令的中转；指令真正生效以 agentd 回报的结果为准。
@@ -28,8 +29,15 @@ import {
   type AgentSyncRequest,
 } from './schemas.js';
 
-/** 多久没同步算离线：agentd 每 5 秒同步一次 */
-const ONLINE_WINDOW_MS = 30_000;
+/** 多久没联系算离线：agentd 每分钟问一次指令，允许错过两次 */
+const ONLINE_WINDOW_MS = 3 * 60_000;
+
+/**
+ * 每台机器最近一次联系 hub 的时间（问指令或同步）。
+ *
+ * 问指令很频繁，只记在内存里不写库；hub 重启后先按库里的最后同步时间算，Mac 一分钟内会再来。
+ */
+const lastContactAt = new Map<string, number>();
 
 /** 指令多久没送到 Mac 就作废；送到后多久没回报结果就算失败 */
 const COMMAND_TTL_MS = 10 * 60_000;
@@ -54,7 +62,19 @@ export function parseRun(row: AgentRunRow): AgentRun | null {
 
 /** 机器是否在线 */
 export function isOnline(row: AgentMachineRow, now = Date.now()): boolean {
-  return now - row.lastSeenAt.getTime() <= ONLINE_WINDOW_MS;
+  const last = Math.max(row.lastSeenAt.getTime(), lastContactAt.get(row.id) ?? 0);
+  return now - last <= ONLINE_WINDOW_MS;
+}
+
+/** agentd 问有没有待发的指令；顺便记下联系时间 */
+export async function hasPendingCommands(machineId: string): Promise<boolean> {
+  lastContactAt.set(machineId, Date.now());
+  const [row] = await db
+    .select({ id: agentCommands.id })
+    .from(agentCommands)
+    .where(and(eq(agentCommands.machineId, machineId), eq(agentCommands.status, 'pending')))
+    .limit(1);
+  return row !== undefined;
 }
 
 /**
@@ -67,6 +87,7 @@ export async function applySync(
   input: AgentSyncRequest,
 ): Promise<{ ackEventId: number; commands: { id: string; type: string; payload: unknown }[] }> {
   const now = new Date();
+  lastContactAt.set(machineId, now.getTime());
   const state: AgentMachineState = {
     health: input.health,
     settings: input.settings,

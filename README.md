@@ -6,7 +6,7 @@ OpenAPI 契约。
 
 - 当前功能：
   - 意见反馈，设计见 [意见反馈设计](./docs/feedback-design.md)。
-  - Agent 管理：Mac 上的 agentd（[yado_agents](../yado_agents)）每 5 秒把状态摘要同步上来，管理端看运行结果、
+  - Agent 管理：Mac 上的 agentd（[yado_agents](../yado_agents)）每分钟来问一次有没有指令，有变化或每小时把状态摘要同步上来，管理端看运行结果、
     改实例与设置都经这里转成指令交给 agentd 执行。hub 不跑流程，只存摘要（不存代码、diff、模型原始输出）。
 - 数据放在 `yado` 库的 `yado_hub` schema；用户只以 Logto 用户 ID 标识，不存昵称、邮箱等资料。
 
@@ -39,7 +39,7 @@ src/
     └── agents/                 Agent 管理
         ├── schemas.ts          同步契约（与 yado_agents 的 src/sync/schemas.ts 对应）、指令白名单、管理端响应
         ├── service.ts          存同步上来的快照、事件、运行，指令的收发与过期
-        ├── routes.ts           agentd 用：POST /v1/agents/sync（机器凭证）
+        ├── routes.ts           agentd 用：GET /v1/agents/check、POST /v1/agents/sync（机器凭证）
         └── admin-routes.ts     管理端：/v1/admin/agents/...
 ```
 
@@ -88,6 +88,7 @@ agentd 用（机器凭证，不是 Logto 登录）：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/v1/agents/check` | 每分钟问一次有没有待执行的指令（只读），也用来判断是否在线 |
 | POST | `/v1/agents/sync` | 上传快照、新事件、相关运行与指令结果；返回已收到的位置与待执行的指令 |
 
 | 状态码 | code | 含义 |
@@ -198,10 +199,12 @@ agentd 用（机器凭证，不是 Logto 登录）：
 1. 在 Mac 上运行 `agentctl hub setup https://hub-api.yado1225.top`，它生成凭证（只存在 Mac 的
    `~/.yado-agents/hub.json`）并打印一行 `AGENT_MACHINE_TOKENS=<机器 ID>:<sha256>`。
 2. 把这一行加进服务器 `/opt/yado/yado-hub/.env`（多台机器用逗号接在后面），重启 hub。
-3. 几秒后管理端「Agent」页能看到这台机器在线。换凭证用 `agentctl hub setup ... --rotate`，再替换 `.env` 里的那一行。
+3. 一分钟内管理端「Agent」页能看到这台机器在线。换凭证用 `agentctl hub setup ... --rotate`，再替换 `.env` 里的那一行。
 
 ## 已知限制
 
 - 限流计数在进程内存中，重启清零；只适用于单实例部署，扩成多实例时需改用 Redis。
 - 管理员名单、agent 机器凭证在环境变量中，修改后需重启容器。
-- 页面发给 Mac 的指令要等它下次同步（约 5 秒）才执行；Mac 离线时指令 10 分钟后作废。
+- 页面发给 Mac 的指令要等它下次来问（每分钟一次）才执行；Mac 离线时指令 10 分钟后作废。
+- 页面上的实例、待办是 Mac 最近一次上传时的状态：Mac 有新事件时一分钟内上传，否则一小时一次；页面上的「立即同步」让它马上传。
+- 「是否在线」看 Mac 最近一次来问的时间，只记在内存里；hub 重启后最多一分钟显示离线。
