@@ -10,6 +10,7 @@ import { logger } from 'hono/logger';
 import { env } from './config/env.js';
 import { pingDb } from './db/index.js';
 import adminRoutes from './modules/admin/index.js';
+import agentRoutes from './modules/agents/routes.js';
 import feedbackRoutes from './modules/feedback/routes.js';
 import { handleError } from './shared/errors.js';
 import { createApp } from './shared/openapi.js';
@@ -55,6 +56,8 @@ app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
 
 // 鉴权挂在各路由的 middleware 字段上，不在此处用 app.use。
 app.route('/v1/feedback', feedbackRoutes);
+// agent 同步接口用机器凭证鉴权，只给 Mac 上的 agentd 用；管理端在 /v1/admin/agents
+app.route('/v1/agents', agentRoutes);
 app.route('/v1/admin', adminRoutes);
 
 /**

@@ -4,7 +4,10 @@
 统一放在这里，不为单个功能另开服务；AI 相关的在 [yado_ai](../yado_ai)。客户端为 iOS，本服务只提供 REST 接口与
 OpenAPI 契约。
 
-- 当前功能：意见反馈，设计见 [意见反馈设计](./docs/feedback-design.md)。
+- 当前功能：
+  - 意见反馈，设计见 [意见反馈设计](./docs/feedback-design.md)。
+  - Agent 管理：Mac 上的 agentd（[yado_agents](../yado_agents)）每 5 秒把状态摘要同步上来，管理端看运行结果、
+    改实例与设置都经这里转成指令交给 agentd 执行。hub 不跑流程，只存摘要（不存代码、diff、模型原始输出）。
 - 数据放在 `yado` 库的 `yado_hub` schema；用户只以 Logto 用户 ID 标识，不存昵称、邮箱等资料。
 
 技术栈与工程约定和 [yado_ai](../yado_ai)、[yadoA_be](../yadoAssets/yadoA_be) 保持一致（Node.js 22、Hono、
@@ -22,6 +25,7 @@ src/
 ├── middleware/
 │   ├── auth.ts                 Logto JWT 校验
 │   ├── admin.ts                管理员校验（ADMIN_USER_IDS）
+│   ├── machine.ts              agentd 的机器凭证校验（AGENT_MACHINE_TOKENS）
 │   └── rate-limit.ts           按用户限流
 ├── shared/                     统一错误、OpenAPIHono 工厂
 └── modules/
@@ -32,6 +36,11 @@ src/
         ├── dto.ts              数据库行转响应
         ├── routes.ts           用户端：/v1/feedback/{product}/...
         └── admin-routes.ts     管理端：/v1/admin/feedback/...
+    └── agents/                 Agent 管理
+        ├── schemas.ts          同步契约（与 yado_agents 的 src/sync/schemas.ts 对应）、指令白名单、管理端响应
+        ├── service.ts          存同步上来的快照、事件、运行，指令的收发与过期
+        ├── routes.ts           agentd 用：POST /v1/agents/sync（机器凭证）
+        └── admin-routes.ts     管理端：/v1/admin/agents/...
 ```
 
 ## 快速开始
@@ -63,12 +72,23 @@ pnpm run dev
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/v1/admin/status` | 是否管理员、待处理反馈单数；任何登录用户都可调用 |
+| GET | `/v1/admin/status` | 是否管理员、待处理反馈单数、agent 待办数；任何登录用户都可调用 |
 | GET | `/v1/admin/feedback/tickets?status=&product=&before=&limit=` | 反馈单列表 |
 | GET | `/v1/admin/feedback/conversations/{id}` | 对话与全部反馈单 |
 | GET | `/v1/admin/feedback/conversations/{id}/messages?before=&limit=` | 对话消息 |
 | POST | `/v1/admin/feedback/conversations/{id}/messages` | 回复 |
 | POST | `/v1/admin/feedback/tickets/{id}/status` | 改状态 |
+| GET | `/v1/admin/agents/overview?tz=&date=` | 机器、实例、待办、某天（默认今天）的汇总 |
+| GET | `/v1/admin/agents/runs?instance=&status=&before=&limit=` | 运行列表 |
+| GET | `/v1/admin/agents/runs/{machineId}/{runId}` | 运行详情：步骤、问题与判断、时间线 |
+| POST | `/v1/admin/agents/commands` | 给 Mac 发指令（白名单：新建 / 修改 / 删除实例、立即运行、取消、改全局设置、处理待办） |
+| GET | `/v1/admin/agents/commands/{id}` | 查指令结果 |
+
+agentd 用（机器凭证，不是 Logto 登录）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/v1/agents/sync` | 上传快照、新事件、相关运行与指令结果；返回已收到的位置与待执行的指令 |
 
 | 状态码 | code | 含义 |
 | --- | --- | --- |
@@ -173,7 +193,15 @@ pnpm run dev
 并经 SSH forced command 触发服务器部署脚本（pull + up -d + 等待健康检查）。
 部署结果的 Bark 通知与 yado_ai 相同，需要时在仓库 Secret 配置 `BARK_DEVICE_KEY`，未配置时跳过。
 
+## 接入一台跑 agentd 的 Mac
+
+1. 在 Mac 上运行 `agentctl hub setup https://hub-api.yado1225.top`，它生成凭证（只存在 Mac 的
+   `~/.yado-agents/hub.json`）并打印一行 `AGENT_MACHINE_TOKENS=<机器 ID>:<sha256>`。
+2. 把这一行加进服务器 `/opt/yado/yado-hub/.env`（多台机器用逗号接在后面），重启 hub。
+3. 几秒后管理端「Agent」页能看到这台机器在线。换凭证用 `agentctl hub setup ... --rotate`，再替换 `.env` 里的那一行。
+
 ## 已知限制
 
 - 限流计数在进程内存中，重启清零；只适用于单实例部署，扩成多实例时需改用 Redis。
-- 管理员名单在环境变量中，修改后需重启容器。
+- 管理员名单、agent 机器凭证在环境变量中，修改后需重启容器。
+- 页面发给 Mac 的指令要等它下次同步（约 5 秒）才执行；Mac 离线时指令 10 分钟后作废。

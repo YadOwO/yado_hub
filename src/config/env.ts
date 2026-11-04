@@ -40,6 +40,23 @@ const envSchema = z.object({
   FEEDBACK_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
   /** 每个用户每天最多发送的反馈消息数 */
   FEEDBACK_RATE_LIMIT_PER_DAY: z.coerce.number().int().positive().default(100),
+
+  /**
+   * 允许同步 agent 状态的机器：`机器 ID:凭证的 sha256`，逗号分隔，例如 `m5-mac:3f2a…`。
+   * 只存哈希，不存凭证本身；凭证由 Mac 上的 `agentctl hub setup` 生成。未配置时同步接口一律 401。
+   */
+  AGENT_MACHINE_TOKENS: z
+    .string()
+    .default('')
+    .refine(
+      (value) =>
+        value
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0)
+          .every((item) => /^[a-z0-9][a-z0-9-]{0,39}:[0-9a-f]{64}$/.test(item)),
+      { message: '格式应为 机器ID:sha256（64 位小写十六进制），多台用逗号分隔' },
+    ),
 });
 
 /** 只对通过校验的环境变量继续初始化，避免错误配置进入运行阶段 */
@@ -74,6 +91,16 @@ export const env = {
     raw.ADMIN_USER_IDS.split(',')
       .map((item) => item.trim())
       .filter((item) => item.length > 0),
+  ),
+  /** 凭证哈希 → 机器 ID；未配置时为空，任何机器都不能同步 */
+  agentMachineTokens: new Map(
+    raw.AGENT_MACHINE_TOKENS.split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .map((item) => {
+        const [machineId = '', hash = ''] = item.split(':');
+        return [hash, machineId] as const;
+      }),
   ),
 } as const;
 

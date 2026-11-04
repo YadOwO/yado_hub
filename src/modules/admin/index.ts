@@ -9,6 +9,8 @@ import { createRoute, z } from '@hono/zod-openapi';
 import { isAdmin } from '../../middleware/admin.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { createApp, jsonError } from '../../shared/openapi.js';
+import agentAdminRoutes from '../agents/admin-routes.js';
+import { countAgentInbox } from '../agents/service.js';
 import feedbackAdminRoutes from '../feedback/admin-routes.js';
 import { countPendingTickets } from '../feedback/service.js';
 
@@ -22,6 +24,10 @@ const AdminStatusSchema = z
     pendingTicketCount: z.number().int().nonnegative().nullable().openapi({
       description: '全部产品的待处理反馈单数；非管理员为 null',
       example: 3,
+    }),
+    agentInboxCount: z.number().int().nonnegative().nullable().openapi({
+      description: 'agent 待办数：交给你决定的问题与需要你处理的运行；非管理员为 null',
+      example: 1,
     }),
   })
   .openapi('AdminStatus');
@@ -43,12 +49,15 @@ const statusRoute = createRoute({
 
 app.openapi(statusRoute, async (c) => {
   if (!isAdmin(c.get('userId'))) {
-    return c.json({ isAdmin: false, pendingTicketCount: null }, 200);
+    return c.json({ isAdmin: false, pendingTicketCount: null, agentInboxCount: null }, 200);
   }
-  return c.json({ isAdmin: true, pendingTicketCount: await countPendingTickets() }, 200);
+  return c.json({ isAdmin: true, pendingTicketCount: await countPendingTickets(), agentInboxCount: await countAgentInbox() }, 200);
 });
 
 /** 意见反馈管理：/v1/admin/feedback/... */
 app.route('/feedback', feedbackAdminRoutes);
+
+/** agent 管理：/v1/admin/agents/... */
+app.route('/agents', agentAdminRoutes);
 
 export default app;

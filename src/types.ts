@@ -8,5 +8,7 @@ export interface AppEnv extends Env {
   Variables: {
     /** 当前请求的用户标识，由鉴权中间件从 JWT 的 sub 写入 */
     userId: string;
+    /** 同步接口里当前请求的机器 ID，由 requireMachine 按机器凭证写入；只在 /v1/agents 下有值 */
+    machineId: string;
   };
 }

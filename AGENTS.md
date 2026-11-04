@@ -84,6 +84,10 @@ middleware/                     请求级横切逻辑（鉴权、管理员、限
 - 用户端路由**必须**在 `createRoute` 的 `middleware` 字段挂 `requireAuth`；管理端路由依次挂
   `requireAuth` 与 `requireAdmin`。不要改用 `app.use('/*', ...)`：子应用挂载后该通配不匹配模块根路径，
   会造成接口绕过鉴权。
+- 例外：`/v1/agents` 下的同步接口只给 Mac 上的 agentd 调用，挂 `requireMachine`（机器凭证），不挂 Logto
+  鉴权。凭证只在 `AGENT_MACHINE_TOKENS` 存 sha256；不要把其他接口挂到机器凭证上。
+- agent 同步只存摘要：不要扩展成接收代码、diff、模型原始输出或本机路径。页面能发给 Mac 的指令只限
+  `modules/agents/schemas.ts` 中的白名单，新增指令要两边（hub 与 yado_agents）一起评估。
 - 用户端查询一律按当前用户过滤，只能读写自己的数据。
 - **日志不记录用户提交的正文**（反馈内容属于用户隐私），只记录功能、用户 ID、耗时与错误类型。
 - 不要在日志或错误响应中输出 token、密钥、完整 JWT 内容。
