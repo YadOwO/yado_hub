@@ -2,7 +2,7 @@
  * agent 管理的管理端路由，由 modules/admin 挂在 /v1/admin/agents 下。
  *
  * 每个路由都在 middleware 字段依次挂 requireAuth 与 requireAdmin。
- * 页面上的操作都是"发指令"：hub 存下指令，agentd 下次同步时取走执行，再回报结果；页面据此轮询指令状态。
+ * 页面上的操作都是"发指令"：hub 存下指令并唤醒 agentd 挂着的长轮询（POST /claim），agentd 取走执行，同步好状态后回报结果；页面据此轮询指令状态。
  */
 import { createRoute, type z } from '@hono/zod-openapi';
 
@@ -174,7 +174,7 @@ const createCommandRoute = createRoute({
   path: '/commands',
   tags: ['admin'],
   summary: '给机器发指令',
-  description: '只接受白名单里的指令。Mac 下次同步（最多几秒）时取走执行，结果用 GET /commands/{id} 查。',
+  description: '只接受白名单里的指令。Mac 挂着的长轮询（POST /claim）会被立即唤醒取走执行（旧版 agentd 最多等一分钟），结果用 GET /commands/{id} 查。',
   middleware: [requireAuth, requireAdmin] as const,
   security: [{ Bearer: [] }],
   request: {

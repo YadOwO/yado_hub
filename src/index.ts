@@ -6,6 +6,7 @@ import { serve } from '@hono/node-server';
 import app from './app.js';
 import { env } from './config/env.js';
 import { closeDb } from './db/index.js';
+import { releaseAllWaiters } from './modules/agents/waiters.js';
 
 /** 进程收到退出信号后，最多等这么久让进行中的请求结束 */
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -27,6 +28,8 @@ const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
  */
 function shutdown(signal: string): void {
   console.log(`收到 ${signal}，正在关闭服务...`);
+  // agentd 的长轮询请求会一直挂着，不先放掉的话 server.close() 要等到兜底的 10 秒、以 exit(1) 退出
+  releaseAllWaiters();
   server.close(() => {
     void closeDb().then(
       () => process.exit(0),

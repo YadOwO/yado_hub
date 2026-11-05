@@ -271,13 +271,23 @@ const CommandResultSchema = z.object({
   message: z.string(),
 });
 
-/** agentd 每次同步上传的内容 */
+/** 一次最多交多少条指令结果 */
+export const MAX_COMMAND_RESULTS = 100;
+
+/**
+ * agentd 每次同步上传的内容。
+ *
+ * commandResults 是过渡期的兼容字段：旧版 agentd 带着它，并从响应里取指令；新版 agentd 不带，指令只走 POST /claim。
+ * 旧版 agentd 都升级后，连同 /check 一起删掉。
+ */
 export const AgentSyncRequestSchema = AgentMachineStateSchema.extend({
   agentdVersion: z.string().max(40),
   events: z.array(AgentEventSchema).max(MAX_EVENTS_PER_SYNC),
   runs: z.array(AgentRunSchema).max(MAX_EVENTS_PER_SYNC),
   discardedRunIds: z.array(z.string()).max(MAX_EVENTS_PER_SYNC),
-  commandResults: z.array(CommandResultSchema).max(100),
+  commandResults: z.array(CommandResultSchema).max(MAX_COMMAND_RESULTS).optional().openapi({
+    description: '旧版 agentd 在这里交指令结果并取指令；不带这个字段时响应里的 commands 恒为空，指令要走 /claim',
+  }),
 }).openapi('AgentSyncRequest');
 
 /** agentd 每次同步上传的内容 */
@@ -290,13 +300,61 @@ const PendingCommandSchema = z.object({ id: z.uuid(), type: z.string(), payload:
 export const AgentSyncResponseSchema = z
   .object({
     ackEventId: z.number().int().nonnegative().openapi({ description: 'hub 已存下的最大事件 ID，下次只传比它大的' }),
-    commands: z.array(PendingCommandSchema),
+    commands: z.array(PendingCommandSchema).openapi({ description: '只有旧版 agentd（请求里带 commandResults）才会收到指令' }),
   })
   .openapi('AgentSyncResponse');
 
+/** 长轮询最多挂起多少秒；要低于 nginx 默认的 proxy_read_timeout（60 秒），否则请求会被代理掐断 */
+export const MAX_CHECK_WAIT_SECONDS = 45;
+
+/** 领指令的请求：交上一批指令的结果，并领取新的 */
+export const AgentClaimRequestSchema = z
+  .object({
+    waitSeconds: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_CHECK_WAIT_SECONDS)
+      .default(0)
+      .openapi({ description: '没有指令时最多挂起多少秒，期间有新指令立即返回；0 表示立即返回', example: MAX_CHECK_WAIT_SECONDS }),
+    results: z.array(CommandResultSchema).max(MAX_COMMAND_RESULTS).default([]).openapi({
+      description: '已经执行完的指令的结果；agentd 要先把相关状态同步上来，再交结果',
+    }),
+  })
+  .openapi('AgentClaimRequest');
+
+/** 领指令的请求 */
+export type AgentClaimRequest = z.infer<typeof AgentClaimRequestSchema>;
+
+/** 领指令的响应 */
+export const AgentClaimResponseSchema = z
+  .object({
+    commands: z.array(PendingCommandSchema).openapi({ description: '本次领到的指令，hub 已把它们标成「已发出」' }),
+  })
+  .openapi('AgentClaimResponse');
+
+/** 问指令的查询参数 */
+export const AgentCheckQuerySchema = z.object({
+  wait: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_CHECK_WAIT_SECONDS)
+    .default(0)
+    .openapi({
+      description: `没有指令时最多挂起多少秒，期间有新指令立即返回；0 或不带表示立即返回（旧版 agentd 的行为）`,
+      example: MAX_CHECK_WAIT_SECONDS,
+    }),
+});
+
 /** 问指令的响应 */
 export const AgentCheckResponseSchema = z
-  .object({ hasCommands: z.boolean().openapi({ description: '有待执行的指令；为 true 时 agentd 马上同步取走' }) })
+  .object({
+    hasCommands: z.boolean().openapi({ description: '有待执行的指令；为 true 时 agentd 马上同步取走' }),
+    waited: z.boolean().openapi({
+      description: '这个 hub 认识并处理了 wait 参数（带了 wait 时为 true）。agentd 据此区分旧 hub：旧 hub 会忽略 wait 立即返回',
+    }),
+  })
   .openapi('AgentCheckResponse');
 
 // ---- 指令 ----
