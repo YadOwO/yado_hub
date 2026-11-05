@@ -24,7 +24,7 @@ const TimezoneSchema = z.string().refine(
   { message: '不支持的时区' },
 );
 
-/** 调度：每天定时、每 N 分钟、cron 表达式 */
+/** 调度：每天定时、每 N 分钟、cron 表达式，或者只手动（一次实现：每次都要带上需求，没有定时） */
 export const AgentScheduleSchema = z
   .discriminatedUnion('kind', [
     z.object({
@@ -34,6 +34,7 @@ export const AgentScheduleSchema = z
     }),
     z.object({ kind: z.literal('interval'), minutes: z.number().int().min(5).max(10_080) }),
     z.object({ kind: z.literal('cron'), expression: z.string().min(1).max(100), timezone: TimezoneSchema }),
+    z.object({ kind: z.literal('manual') }),
   ])
   .openapi('AgentSchedule');
 
@@ -91,7 +92,7 @@ export const AgentRunSchema = z
     instanceId: z.string(),
     flowType: z.string(),
     status: z.string().openapi({
-      description: 'queued 排队中、running 运行中、succeeded 完成、needs_attention 需要你处理、failed 失败、canceled 已取消、interrupted 被中断',
+      description: 'queued 排队中、running 运行中、waiting 等你确认（一次实现）、succeeded 完成、needs_attention 需要你处理、failed 失败、canceled 已取消、interrupted 被中断',
     }),
     trigger: z.string().openapi({ description: 'schedule 定时、manual 手动、delegate 你把一个问题交给主审决定' }),
     isDryRun: z.boolean(),
@@ -417,6 +418,8 @@ export const AgentCommandInputSchema = z
     z.object({ type: z.literal('instance.delete'), payload: z.object({ id: IdSchema }).strict() }),
     z.object({ type: z.literal('instance.run'), payload: z.object({ id: IdSchema }).strict() }),
     z.object({ type: z.literal('run.cancel'), payload: z.object({ runId: IdSchema }).strict() }),
+    // 一次实现：确认开工。页面上不能带补充信息，也不能提需求（只能在 Mac 上用 agentctl）
+    z.object({ type: z.literal('run.confirm'), payload: z.object({ runId: IdSchema }).strict() }),
     z.object({
       type: z.literal('settings.update'),
       payload: z
