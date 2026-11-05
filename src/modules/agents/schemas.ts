@@ -69,7 +69,12 @@ export const AgentFindingSchema = z
     verdict: z.string().nullable().openapi({ description: 'fix 修、wontfix 不修、escalate 交给你；还没判时为 null' }),
     reason: z.string().nullable().openapi({ description: '主审的理由' }),
     fixCommit: z.string().nullable(),
-    resolution: z.string().nullable().openapi({ description: '交给你的问题的处理结果：wontfix、done；还没处理为 null' }),
+    resolution: z
+      .string()
+      .nullable()
+      .openapi({ description: '交给你的问题的处理结果：wontfix 不修、done 已处理、delegated 交给主审；还没处理为 null' }),
+    // 旧版 agentd 不传，按 null 处理
+    delegatedRunId: z.string().nullable().default(null).openapi({ description: '交给主审时，主审决定它的那次运行' }),
   })
   .openapi('AgentFinding');
 
@@ -82,7 +87,7 @@ export const AgentRunSchema = z
     status: z.string().openapi({
       description: 'queued 排队中、running 运行中、succeeded 完成、needs_attention 需要你处理、failed 失败、canceled 已取消、interrupted 被中断',
     }),
-    trigger: z.string().openapi({ description: 'schedule 定时、manual 手动' }),
+    trigger: z.string().openapi({ description: 'schedule 定时、manual 手动、delegate 你把一个问题交给主审决定' }),
     isDryRun: z.boolean(),
     baseCommit: z.string().nullable(),
     headCommit: z.string().nullable(),
@@ -96,6 +101,8 @@ export const AgentRunSchema = z
     startedAt: z.string().nullable(),
     finishedAt: z.string().nullable(),
     acknowledgedAt: z.string().nullable(),
+    // 旧版 agentd 不传，按 null 处理
+    delegatedFrom: z.string().nullable().default(null).openapi({ description: '交给主审的运行：那个问题所在的运行' }),
     steps: z.array(AgentStepSchema),
     findings: z.array(AgentFindingSchema),
   })
@@ -305,7 +312,15 @@ export const AgentCommandInputSchema = z
     }),
     z.object({
       type: z.literal('inbox.resolve'),
-      payload: z.object({ itemId: IdSchema, action: z.enum(['wontfix', 'done']) }).strict(),
+      payload: z
+        .object({
+          itemId: IdSchema,
+          // delegate：交给主审在修和不修里选一个，Mac 上另开一次运行
+          action: z.enum(['wontfix', 'done', 'delegate']),
+          // 交给主审时补充给它的信息，会写进给主审看的材料
+          note: z.string().max(1000).optional(),
+        })
+        .strict(),
     }),
     // 让 Mac 马上把最新状态传上来；Mac 平时一小时才完整同步一次
     z.object({ type: z.literal('sync.now'), payload: z.object({}).strict() }),
