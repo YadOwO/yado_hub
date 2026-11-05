@@ -12,6 +12,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { createApp, jsonError } from '../../shared/openapi.js';
 import {
   AgentCommandSchema,
+  AgentLessonListSchema,
   AgentOverviewSchema,
   AgentRunDetailSchema,
   AgentRunListSchema,
@@ -149,6 +150,24 @@ const getRunRoute = createRoute({
   },
 });
 
+/** 经验列表的 OpenAPI 契约 */
+const listLessonsRoute = createRoute({
+  method: 'get',
+  path: '/lessons',
+  tags: ['admin'],
+  summary: 'agent 经验列表',
+  description:
+    '全部机器的经验（含已作废的）与各机器生效中经验的上限，是 Mac 最近一次上传时的状态。' +
+    '页面上只能作废、恢复（指令 lesson.void、lesson.restore），改文字和新增只能在 Mac 上做。',
+  middleware: [requireAuth, requireAdmin] as const,
+  security: [{ Bearer: [] }],
+  responses: {
+    200: { description: '经验列表', content: { 'application/json': { schema: AgentLessonListSchema } } },
+    401: jsonError('未通过身份校验'),
+    403: jsonError('不是管理员'),
+  },
+});
+
 /** 发指令的 OpenAPI 契约 */
 const createCommandRoute = createRoute({
   method: 'post',
@@ -231,6 +250,19 @@ app.openapi(getRunRoute, async (c) => {
   const { machineId, runId } = c.req.valid('param');
   const { run, events } = await getRun(machineId, runId);
   return c.json({ ...run, machineId, events: events.map(toEventDTO) }, 200);
+});
+
+app.openapi(listLessonsRoute, async (c) => {
+  const parsed = (await listMachines()).map((row) => ({ row, state: parseMachineState(row) }));
+  return c.json(
+    {
+      lessons: parsed.flatMap(({ row, state }) => (state?.lessons ?? []).map((lesson) => ({ ...lesson, machineId: row.id }))),
+      limits: parsed.flatMap(({ row, state }) =>
+        state === null || state.lessonLimits === null ? [] : [{ ...state.lessonLimits, machineId: row.id }],
+      ),
+    },
+    200,
+  );
 });
 
 app.openapi(createCommandRoute, async (c) => {

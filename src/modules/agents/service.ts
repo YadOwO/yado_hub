@@ -3,7 +3,7 @@
  *
  * - 同步：agentd 每分钟问一次有没有指令（只读，不写库）；有指令、本地有新事件，或距上次同步满一小时时，
  *   上传快照与新事件，hub 存下后回报已收到的位置，并把待发的指令交给它。
- * - 管理端：总览、运行列表与详情、发指令、查指令结果。
+ * - 管理端：总览、运行列表与详情、经验、发指令、查指令结果。
  *
  * hub 不参与流程执行，只是 agentd 状态的镜像和指令的中转；指令真正生效以 agentd 回报的结果为准。
  */
@@ -95,6 +95,8 @@ export async function applySync(
     flows: input.flows,
     instances: input.instances,
     inbox: input.inbox,
+    lessons: input.lessons,
+    lessonLimits: input.lessonLimits,
   };
 
   return db.transaction(async (tx) => {

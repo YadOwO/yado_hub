@@ -81,7 +81,8 @@ pnpm run dev
 | GET | `/v1/admin/agents/overview?tz=&date=` | 机器、实例、待办、某天（默认今天）的汇总 |
 | GET | `/v1/admin/agents/runs?instance=&status=&before=&limit=` | 运行列表 |
 | GET | `/v1/admin/agents/runs/{machineId}/{runId}` | 运行详情：步骤、问题与判断、时间线 |
-| POST | `/v1/admin/agents/commands` | 给 Mac 发指令（白名单：新建 / 修改 / 删除实例、立即运行、取消、改全局设置、处理待办） |
+| GET | `/v1/admin/agents/lessons` | 经验（含已作废的）与各机器生效中经验的上限 |
+| POST | `/v1/admin/agents/commands` | 给 Mac 发指令（白名单：新建 / 修改 / 删除实例、立即运行、取消、改全局设置、处理待办、立即同步、作废 / 恢复经验） |
 | GET | `/v1/admin/agents/commands/{id}` | 查指令结果 |
 
 agentd 用（机器凭证，不是 Logto 登录）：
@@ -89,7 +90,7 @@ agentd 用（机器凭证，不是 Logto 登录）：
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/v1/agents/check` | 每分钟问一次有没有待执行的指令（只读），也用来判断是否在线 |
-| POST | `/v1/agents/sync` | 上传快照、新事件、相关运行与指令结果；返回已收到的位置与待执行的指令 |
+| POST | `/v1/agents/sync` | 上传快照（含经验）、新事件、相关运行与指令结果；返回已收到的位置与待执行的指令 |
 
 | 状态码 | code | 含义 |
 | --- | --- | --- |

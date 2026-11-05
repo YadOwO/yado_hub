@@ -64,9 +64,15 @@ export const AgentFindingSchema = z
     file: z.string(),
     line: z.number().int().nullable(),
     severity: z.string().openapi({ description: 'high、medium、low' }),
-    category: z.string(),
+    category: z.string().openapi({
+      description:
+        'bug、security、performance、type-safety、error-handling、maintainability、test、style、other；' +
+        '代码清理另有 duplication、complexity、dead-code、naming、layering、consistency',
+    }),
     source: z.string().openapi({ description: 'reviewer（DS）或 lead（主审补充）' }),
-    verdict: z.string().nullable().openapi({ description: 'fix 修、wontfix 不修、escalate 交给你；还没判时为 null' }),
+    verdict: z.string().nullable().openapi({
+      description: 'fix 修、wontfix 不修、escalate 交给你、defer 以后再做（代码清理：值得做但不在这次）；还没判时为 null',
+    }),
     reason: z.string().nullable().openapi({ description: '主审的理由' }),
     fixCommit: z.string().nullable(),
     resolution: z
@@ -136,7 +142,7 @@ export const AgentInstanceSchema = z
     maxRounds: z.number().int(),
     models: z.record(z.string(), z.string()).openapi({ description: '这个实例单独指定的模型' }),
     nextRunAt: z.string().nullable(),
-    cursor: z.string().nullable().openapi({ description: '上次 review 到的提交' }),
+    cursor: z.string().nullable().openapi({ description: '上次 review 到的提交；代码清理（cleanup）没有，恒为 null' }),
     checks: z.array(z.string()),
     lastRun: AgentLastRunSchema.nullable(),
   })
@@ -170,8 +176,57 @@ export const AgentSettingsSchema = z
 
 /** 流程类型 */
 export const AgentFlowSchema = z
-  .object({ type: z.string(), title: z.string(), description: z.string(), isPaused: z.boolean() })
+  .object({
+    type: z.string(),
+    title: z.string(),
+    description: z.string(),
+    isPaused: z.boolean(),
+    // 旧版 agentd 不传，按 null 处理
+    defaultSchedule: AgentScheduleSchema.nullable()
+      .default(null)
+      .openapi({ description: '新建这种流程的实例时默认的调度，页面据此预填' }),
+  })
   .openapi('AgentFlow');
+
+/**
+ * 经验文字的上限，只是防御。
+ *
+ * 契约是 rule ≤ 60 字、reason ≤ 40 字，由 agentd 保证；hub 这里放宽，免得一条超长就让整次同步（快照、事件）被拒。
+ */
+const LESSON_TEXT_MAX = 200;
+
+/** 一次同步最多带多少条经验（含已作废的） */
+const MAX_LESSONS_PER_SYNC = 1000;
+
+/**
+ * 经验：主审从 review、代码清理里总结的一句话规则，以后的 agent 都会照着做，提出后马上生效。
+ *
+ * 页面上只能作废、恢复（指令 lesson.void、lesson.restore）；改文字和手动新增只能在 Mac 上用 agentctl，
+ * 因为经验会写进给模型的提示词，不能让管理员账号被盗的人借页面改。
+ */
+export const AgentLessonSchema = z
+  .object({
+    id: z.number().int().openapi({ description: 'agentd 本地的经验 ID，页面上显示为 L<id>' }),
+    scope: z.enum(['global', 'repo']).openapi({ description: 'global 所有仓库通用、repo 只用于 repo 那个仓库' }),
+    repo: z.string().nullable().openapi({ description: 'scope 为 repo 时的 owner/name', example: 'YadOwO/yado_hub' }),
+    rule: z.string().max(LESSON_TEXT_MAX).openapi({ description: '一句话规则（≤ 60 字）' }),
+    reason: z.string().max(LESSON_TEXT_MAX).nullable().openapi({ description: '一句话理由（≤ 40 字），可以没有' }),
+    status: z.enum(['active', 'void']).openapi({ description: 'active 生效中、void 已作废' }),
+    source: z.string().openapi({ description: 'cleanup、review（那次运行的主审提出的）或 manual（在 Mac 上手动加的）' }),
+    sourceRunId: z.string().nullable().openapi({ description: '提出它的那次运行' }),
+    replacesId: z.number().int().nullable().openapi({ description: '这条替换掉的旧经验' }),
+    replacedById: z.number().int().nullable().openapi({ description: '这条（已作废）被哪条新经验替换掉了' }),
+    hits: z.number().int().openapi({ description: '之后的运行确认有问题违反了它的次数' }),
+    lastHitAt: z.string().nullable(),
+    createdAt: z.string(),
+    voidedAt: z.string().nullable(),
+  })
+  .openapi('AgentLesson');
+
+/** 生效中的经验最多几条：通用的、每个仓库的；超过时 agentd 不再加，恢复也会被拒 */
+export const AgentLessonLimitsSchema = z
+  .object({ global: z.number().int(), repo: z.number().int() })
+  .openapi('AgentLessonLimits');
 
 /** 机器的健康状态 */
 const AgentHealthSchema = z.object({
@@ -189,6 +244,9 @@ export const AgentMachineStateSchema = z.object({
   flows: z.array(AgentFlowSchema),
   instances: z.array(AgentInstanceSchema).max(200),
   inbox: z.array(AgentInboxItemSchema).max(500),
+  // 旧版 agentd 不传，按没有经验处理
+  lessons: z.array(AgentLessonSchema).max(MAX_LESSONS_PER_SYNC).default([]),
+  lessonLimits: AgentLessonLimitsSchema.nullable().default(null),
 });
 
 /** 机器的快照 */
@@ -245,6 +303,9 @@ export const AgentCheckResponseSchema = z
 
 /** 实例 ID、运行 ID */
 const IdSchema = z.string().min(1).max(200);
+
+/** 经验 ID */
+const LessonIdSchema = z.number().int().min(1);
 
 /** 全局设置里各角色的默认模型：只写要改的角色 */
 const RoleModelsPatchSchema = z
@@ -324,6 +385,10 @@ export const AgentCommandInputSchema = z
     }),
     // 让 Mac 马上把最新状态传上来；Mac 平时一小时才完整同步一次
     z.object({ type: z.literal('sync.now'), payload: z.object({}).strict() }),
+    // 经验只能作废、恢复，不能改文字或新增（会写进模型的提示词，只能在 Mac 上改）
+    z.object({ type: z.literal('lesson.void'), payload: z.object({ id: LessonIdSchema }).strict() }),
+    // 生效中的经验已满时 agentd 会拒绝，原因在指令结果里
+    z.object({ type: z.literal('lesson.restore'), payload: z.object({ id: LessonIdSchema }).strict() }),
   ])
   .openapi('AgentCommandInput');
 
@@ -407,6 +472,24 @@ export const OverviewQuerySchema = z.object({
     .optional()
     .openapi({ description: '汇总哪一天，默认今天' }),
 });
+
+/** 带机器 ID 的经验 */
+export const AgentLessonItemSchema = AgentLessonSchema.extend({ machineId: z.string() }).openapi('AgentLessonItem');
+
+/** 某台机器的经验上限 */
+export const AgentLessonLimitsItemSchema = AgentLessonLimitsSchema.extend({ machineId: z.string() }).openapi(
+  'AgentLessonLimitsItem',
+);
+
+/** 经验列表 */
+export const AgentLessonListSchema = z
+  .object({
+    lessons: z.array(AgentLessonItemSchema).openapi({ description: '全部机器的经验，含已作废的' }),
+    limits: z
+      .array(AgentLessonLimitsItemSchema)
+      .openapi({ description: '各机器生效中经验的上限；旧版 agentd 没报的机器不在里面' }),
+  })
+  .openapi('AgentLessonList');
 
 /** 运行列表里的一项：不带步骤与问题 */
 export const AgentRunListItemSchema = AgentRunSchema.omit({ steps: true, findings: true })
