@@ -152,6 +152,9 @@ export const AgentInstanceSchema = z
   })
   .openapi('AgentInstance');
 
+/** 待办里等你点头的全文最长多少字；和 agentd 的 APPROVAL_TEXT_MAX 一致 */
+const AGENT_APPROVAL_TEXT_MAX = 20_000;
+
 /** 一条待办 */
 export const AgentInboxItemSchema = z
   .object({
@@ -164,6 +167,13 @@ export const AgentInboxItemSchema = z
     severity: z.string().nullable(),
     location: z.string().nullable(),
     runStatus: z.string().nullable(),
+    // 旧版 agentd 不传，按 null 处理
+    approvalKind: z.enum(['plan', 'confirm']).nullable().default(null).openapi({
+      description: '等你点头的种类：plan 发布计划、confirm 计划外要你确认的事；别的待办为 null',
+    }),
+    approvalText: z.string().max(AGENT_APPROVAL_TEXT_MAX).nullable().default(null).openapi({
+      description: '等你点头时要你看的全文（agentd 已打码）；别的待办为 null',
+    }),
     createdAt: z.string(),
   })
   .openapi('AgentInboxItem');
@@ -508,8 +518,9 @@ export const AgentCommandInputSchema = z
         .object({
           itemId: IdSchema,
           // delegate：交给主审在修和不修里选一个，Mac 上另开一次运行
-          action: z.enum(['wontfix', 'done', 'delegate']),
-          // 交给主审时补充给它的信息，会写进给主审看的材料
+          // approve / reject：同意或拒绝等你点头的运行（发布）；页面只能点头，不能改计划和命令
+          action: z.enum(['wontfix', 'done', 'delegate', 'approve', 'reject']),
+          // 交给主审、同意或拒绝时补充的信息；交给主审时会写进给主审看的材料
           note: z.string().max(1000).optional(),
         })
         .strict(),
