@@ -121,7 +121,7 @@ const listRunsRoute = createRoute({
   path: '/runs',
   tags: ['admin'],
   summary: 'agent 运行列表',
-  description: '可按机器、实例、状态筛选，最新的在前，before 游标分页。',
+  description: '可按机器、流程类型、实例、状态筛选，最新的在前，before 游标分页。',
   middleware: [requireAuth, requireAdmin] as const,
   security: [{ Bearer: [] }],
   request: { query: RunListQuerySchema },

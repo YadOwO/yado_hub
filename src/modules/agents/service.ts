@@ -372,6 +372,8 @@ export async function summarizeDay(timezone: string, date: string | undefined): 
 /** 运行列表的筛选条件 */
 export interface IRunFilter {
   machine?: string;
+  /** 流程类型 */
+  flow?: string;
   instance?: string;
   status?: string;
   before?: number;
@@ -386,6 +388,10 @@ export async function listRuns(filter: IRunFilter): Promise<IPage<AgentRunRow>> 
   }
   if (filter.instance !== undefined) {
     conditions.push(eq(agentRuns.instanceId, filter.instance));
+  }
+  if (filter.flow !== undefined) {
+    // 流程类型在摘要 jsonb 里，没有单独的列
+    conditions.push(sql`${agentRuns.data}->>'flowType' = ${filter.flow}`);
   }
   if (filter.status !== undefined) {
     conditions.push(eq(agentRuns.status, filter.status));

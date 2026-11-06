@@ -677,6 +677,7 @@ export const AgentRunListSchema = z
 /** 运行列表的查询参数 */
 export const RunListQuerySchema = z.object({
   machine: z.string().optional(),
+  flow: z.string().optional().openapi({ description: '流程类型，如 review、explore' }),
   instance: z.string().optional(),
   status: z.string().optional(),
   before: z.coerce.number().int().positive().optional().openapi({

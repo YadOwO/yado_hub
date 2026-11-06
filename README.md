@@ -79,7 +79,7 @@ pnpm run dev
 | POST | `/v1/admin/feedback/conversations/{id}/messages` | 回复 |
 | POST | `/v1/admin/feedback/tickets/{id}/status` | 改状态 |
 | GET | `/v1/admin/agents/overview?tz=&date=` | 机器、实例、待办、某天（默认今天）的汇总 |
-| GET | `/v1/admin/agents/runs?instance=&status=&before=&limit=` | 运行列表 |
+| GET | `/v1/admin/agents/runs?flow=&instance=&status=&before=&limit=` | 运行列表，可按流程类型、实例、状态筛 |
 | GET | `/v1/admin/agents/runs/{machineId}/{runId}` | 运行详情：步骤、问题与判断、时间线 |
 | GET | `/v1/admin/agents/lessons` | 经验（含已作废的）与各机器生效中经验的上限 |
 | POST | `/v1/admin/agents/commands` | 给 Mac 发指令（白名单：新建 / 修改 / 删除实例、立即运行、取消、改全局设置、处理待办、立即同步、作废 / 恢复经验） |
