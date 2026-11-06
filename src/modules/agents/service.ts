@@ -132,6 +132,9 @@ export async function applySync(
     inbox: input.inbox,
     lessons: input.lessons,
     lessonLimits: input.lessonLimits,
+    ideas: input.ideas,
+    preferences: input.preferences,
+    preferenceLimit: input.preferenceLimit,
   };
 
   return db.transaction(async (tx) => {
@@ -452,5 +455,15 @@ export async function getCommand(id: string): Promise<AgentCommandRow> {
 /** 全部机器的待办总数，用于管理入口的角标 */
 export async function countAgentInbox(): Promise<number> {
   const rows = await db.select({ count: sql<number>`coalesce(jsonb_array_length(${agentMachines.state} -> 'inbox'), 0)` }).from(agentMachines);
+  return rows.reduce((sum, row) => sum + Number(row.count), 0);
+}
+
+/** 全部机器还没处理的产品探索想法数，用于「想法」标签的角标 */
+export async function countOpenIdeas(): Promise<number> {
+  const rows = await db
+    .select({
+      count: sql<number>`coalesce(jsonb_array_length(jsonb_path_query_array(${agentMachines.state}, '$.ideas[*] ? (@.status == "open")')), 0)`,
+    })
+    .from(agentMachines);
   return rows.reduce((sum, row) => sum + Number(row.count), 0);
 }

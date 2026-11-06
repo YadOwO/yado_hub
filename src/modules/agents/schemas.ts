@@ -92,7 +92,7 @@ export const AgentRunSchema = z
     instanceId: z.string(),
     flowType: z.string(),
     status: z.string().openapi({
-      description: 'queued 排队中、running 运行中、waiting 等你确认（一次实现）、succeeded 完成、needs_attention 需要你处理、failed 失败、canceled 已取消、interrupted 被中断',
+      description: 'queued 排队中、running 运行中、succeeded 完成、needs_attention 需要你处理、failed 失败、canceled 已取消、interrupted 被中断',
     }),
     trigger: z.string().openapi({ description: 'schedule 定时、manual 手动、delegate 你把一个问题交给主审决定' }),
     isDryRun: z.boolean(),
@@ -146,6 +146,9 @@ export const AgentInstanceSchema = z
     cursor: z.string().nullable().openapi({ description: '上次 review 到的提交；代码清理（cleanup）没有，恒为 null' }),
     checks: z.array(z.string()),
     lastRun: AgentLastRunSchema.nullable(),
+    // 旧版 agentd 不传，按 null 处理
+    ideaLimit: z.number().int().nullable().default(null).openapi({ description: '产品探索：每个产品最多几条没处理的想法；别的流程为 null' }),
+    isWebEnabled: z.boolean().nullable().default(null).openapi({ description: '产品探索：主审能不能上网；别的流程为 null' }),
   })
   .openapi('AgentInstance');
 
@@ -229,6 +232,62 @@ export const AgentLessonLimitsSchema = z
   .object({ global: z.number().int(), repo: z.number().int() })
   .openapi('AgentLessonLimits');
 
+/**
+ * 想法文字的上限，只是防御。
+ *
+ * 契约是标题 ≤ 40、为什么 ≤ 600、做什么 ≤ 1500、备注 ≤ 500 字，由 agentd 保证；hub 这里放宽，免得一条超长就让整次同步被拒。
+ */
+const IDEA_TEXT_MAX = 4000;
+
+/** 一次同步最多带多少条想法、产品偏好（含已处理、已作废的） */
+const MAX_IDEAS_PER_SYNC = 1000;
+
+/**
+ * 产品探索的想法：主审定时看每个产品，提出接下来可以做什么，你在页面上采纳或丢弃（都可以写备注）。
+ *
+ * 想法是产品层面的文字，不含代码；要在页面上读全文再决定，所以同步全文。
+ * 采纳只是记下来，不会开工：要做的话在 Mac 上把想法贴进 /yado-implement。
+ */
+export const AgentIdeaSchema = z
+  .object({
+    id: z.number().int().openapi({ description: 'agentd 本地的想法 ID，页面上显示为 I<id>' }),
+    instanceId: z.string(),
+    product: z.string().openapi({ description: '产品名，例如 芽豆资产' }),
+    runId: z.string().openapi({ description: '提出它的那次运行' }),
+    title: z.string().max(IDEA_TEXT_MAX),
+    why: z.string().max(IDEA_TEXT_MAX).openapi({ description: '为什么值得做' }),
+    what: z.string().max(IDEA_TEXT_MAX).openapi({ description: '做什么' }),
+    repos: z.array(z.string()).max(20).openapi({ description: '涉及的仓库目录名' }),
+    size: z.enum(['S', 'M', 'L']).openapi({ description: 'S 半天内、M 一两天、L 更大' }),
+    questions: z.array(z.string().max(IDEA_TEXT_MAX)).max(10).openapi({ description: '要你拿主意的问题' }),
+    status: z.enum(['open', 'adopted', 'discarded']).openapi({ description: 'open 没处理、adopted 采纳、discarded 丢弃' }),
+    note: z.string().max(IDEA_TEXT_MAX).nullable().openapi({ description: '你处理时写的备注' }),
+    decidedAt: z.string().nullable(),
+    createdAt: z.string(),
+  })
+  .openapi('AgentIdea');
+
+/**
+ * 产品偏好：主审从你对想法的处理和备注里总结的一句话，以后的探索照着提想法。
+ *
+ * 和经验一样，页面上只能作废、恢复（指令 preference.void、preference.restore）。
+ */
+export const AgentPreferenceSchema = z
+  .object({
+    id: z.number().int().openapi({ description: 'agentd 本地的偏好 ID，页面上显示为 P<id>' }),
+    instanceId: z.string(),
+    product: z.string(),
+    rule: z.string().max(LESSON_TEXT_MAX),
+    reason: z.string().max(LESSON_TEXT_MAX).nullable(),
+    status: z.enum(['active', 'void']),
+    sourceRunId: z.string().nullable().openapi({ description: '总结出它的那次探索' }),
+    replacesId: z.number().int().nullable(),
+    replacedById: z.number().int().nullable(),
+    createdAt: z.string(),
+    voidedAt: z.string().nullable(),
+  })
+  .openapi('AgentPreference');
+
 /** 机器的健康状态 */
 const AgentHealthSchema = z.object({
   status: z.enum(['ok', 'degraded']),
@@ -248,6 +307,10 @@ export const AgentMachineStateSchema = z.object({
   // 旧版 agentd 不传，按没有经验处理
   lessons: z.array(AgentLessonSchema).max(MAX_LESSONS_PER_SYNC).default([]),
   lessonLimits: AgentLessonLimitsSchema.nullable().default(null),
+  // 旧版 agentd 不传，按没有想法、偏好处理
+  ideas: z.array(AgentIdeaSchema).max(MAX_IDEAS_PER_SYNC).default([]),
+  preferences: z.array(AgentPreferenceSchema).max(MAX_IDEAS_PER_SYNC).default([]),
+  preferenceLimit: z.number().int().nullable().default(null),
 });
 
 /** 机器的快照 */
@@ -363,8 +426,14 @@ export const AgentCheckResponseSchema = z
 /** 实例 ID、运行 ID */
 const IdSchema = z.string().min(1).max(200);
 
-/** 经验 ID */
+/** 经验、想法、产品偏好的 ID */
 const LessonIdSchema = z.number().int().min(1);
+
+/** 处理想法时备注的上限，与 agentd 一致 */
+const IDEA_NOTE_MAX = 500;
+
+/** 每个产品没处理的想法上限最大能设到几，与 agentd 一致 */
+const IDEA_LIMIT_MAX = 10;
 
 /** 全局设置里各角色的默认模型：只写要改的角色 */
 const RoleModelsPatchSchema = z
@@ -412,14 +481,15 @@ export const AgentCommandInputSchema = z
           from: z.string().optional(),
           maxRounds: z.number().int().min(1).max(5).optional(),
           models: RoleModelsOverridePatchSchema.optional(),
+          // 产品探索：每个产品最多几条没处理的想法、主审能不能上网
+          ideaLimit: z.number().int().min(1).max(IDEA_LIMIT_MAX).optional(),
+          isWebEnabled: z.boolean().optional(),
         })
         .strict(),
     }),
     z.object({ type: z.literal('instance.delete'), payload: z.object({ id: IdSchema }).strict() }),
     z.object({ type: z.literal('instance.run'), payload: z.object({ id: IdSchema }).strict() }),
     z.object({ type: z.literal('run.cancel'), payload: z.object({ runId: IdSchema }).strict() }),
-    // 一次实现：确认开工。页面上不能带补充信息，也不能提需求（只能在 Mac 上用 agentctl）
-    z.object({ type: z.literal('run.confirm'), payload: z.object({ runId: IdSchema }).strict() }),
     z.object({
       type: z.literal('settings.update'),
       payload: z
@@ -450,6 +520,20 @@ export const AgentCommandInputSchema = z
     z.object({ type: z.literal('lesson.void'), payload: z.object({ id: LessonIdSchema }).strict() }),
     // 生效中的经验已满时 agentd 会拒绝，原因在指令结果里
     z.object({ type: z.literal('lesson.restore'), payload: z.object({ id: LessonIdSchema }).strict() }),
+    // 产品探索：采纳或丢弃一条想法，可以写备注。采纳不会开工，要做的话在 Mac 上用 /yado-implement
+    z.object({
+      type: z.literal('idea.decide'),
+      payload: z
+        .object({
+          id: LessonIdSchema,
+          decision: z.enum(['adopted', 'discarded']),
+          note: z.string().max(IDEA_NOTE_MAX).optional(),
+        })
+        .strict(),
+    }),
+    // 产品偏好和经验一样，只能作废、恢复；这个产品已满时恢复会被 agentd 拒绝
+    z.object({ type: z.literal('preference.void'), payload: z.object({ id: LessonIdSchema }).strict() }),
+    z.object({ type: z.literal('preference.restore'), payload: z.object({ id: LessonIdSchema }).strict() }),
   ])
   .openapi('AgentCommandInput');
 
@@ -542,6 +626,9 @@ export const AgentLessonLimitsItemSchema = AgentLessonLimitsSchema.extend({ mach
   'AgentLessonLimitsItem',
 );
 
+/** 带机器 ID 的产品偏好 */
+export const AgentPreferenceItemSchema = AgentPreferenceSchema.extend({ machineId: z.string() }).openapi('AgentPreferenceItem');
+
 /** 经验列表 */
 export const AgentLessonListSchema = z
   .object({
@@ -549,8 +636,25 @@ export const AgentLessonListSchema = z
     limits: z
       .array(AgentLessonLimitsItemSchema)
       .openapi({ description: '各机器生效中经验的上限；旧版 agentd 没报的机器不在里面' }),
+    preferences: z.array(AgentPreferenceItemSchema).openapi({ description: '全部机器的产品偏好，含最近作废的' }),
+    preferenceLimits: z
+      .array(z.object({ machineId: z.string(), limit: z.number().int() }))
+      .openapi({ description: '各机器每个产品生效中偏好的上限；旧版 agentd 没报的机器不在里面' }),
   })
   .openapi('AgentLessonList');
+
+/** 带机器 ID 的想法 */
+export const AgentIdeaItemSchema = AgentIdeaSchema.extend({ machineId: z.string() }).openapi('AgentIdeaItem');
+
+/** 想法列表 */
+export const AgentIdeaListSchema = z
+  .object({
+    ideas: z.array(AgentIdeaItemSchema).openapi({ description: '全部机器的想法：没处理的全部，已处理的只有最近一部分' }),
+    limits: z
+      .array(z.object({ machineId: z.string(), instanceId: z.string(), ideaLimit: z.number().int() }))
+      .openapi({ description: '各产品探索实例每个产品没处理想法的上限' }),
+  })
+  .openapi('AgentIdeaList');
 
 /** 运行列表里的一项：不带步骤与问题 */
 export const AgentRunListItemSchema = AgentRunSchema.omit({ steps: true, findings: true })

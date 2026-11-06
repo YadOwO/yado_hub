@@ -12,6 +12,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { createApp, jsonError } from '../../shared/openapi.js';
 import {
   AgentCommandSchema,
+  AgentIdeaListSchema,
   AgentLessonListSchema,
   AgentOverviewSchema,
   AgentRunDetailSchema,
@@ -155,14 +156,32 @@ const listLessonsRoute = createRoute({
   method: 'get',
   path: '/lessons',
   tags: ['admin'],
-  summary: 'agent 经验列表',
+  summary: 'agent 经验与产品偏好',
   description:
-    '全部机器的经验（含已作废的）与各机器生效中经验的上限，是 Mac 最近一次上传时的状态。' +
-    '页面上只能作废、恢复（指令 lesson.void、lesson.restore），改文字和新增只能在 Mac 上做。',
+    '全部机器的经验（含已作废的）、产品偏好与各自的上限，是 Mac 最近一次上传时的状态。' +
+    '页面上只能作废、恢复（指令 lesson.void / lesson.restore、preference.void / preference.restore），改文字和新增只能在 Mac 上做。',
   middleware: [requireAuth, requireAdmin] as const,
   security: [{ Bearer: [] }],
   responses: {
     200: { description: '经验列表', content: { 'application/json': { schema: AgentLessonListSchema } } },
+    401: jsonError('未通过身份校验'),
+    403: jsonError('不是管理员'),
+  },
+});
+
+/** 想法列表的 OpenAPI 契约 */
+const listIdeasRoute = createRoute({
+  method: 'get',
+  path: '/ideas',
+  tags: ['admin'],
+  summary: '产品探索的想法',
+  description:
+    '全部机器的想法（全文）与各实例每个产品的上限，是 Mac 最近一次上传时的状态。' +
+    '页面上只能采纳或丢弃（指令 idea.decide，可以写备注）；采纳不会开工。',
+  middleware: [requireAuth, requireAdmin] as const,
+  security: [{ Bearer: [] }],
+  responses: {
+    200: { description: '想法列表', content: { 'application/json': { schema: AgentIdeaListSchema } } },
     401: jsonError('未通过身份校验'),
     403: jsonError('不是管理员'),
   },
@@ -259,6 +278,27 @@ app.openapi(listLessonsRoute, async (c) => {
       lessons: parsed.flatMap(({ row, state }) => (state?.lessons ?? []).map((lesson) => ({ ...lesson, machineId: row.id }))),
       limits: parsed.flatMap(({ row, state }) =>
         state === null || state.lessonLimits === null ? [] : [{ ...state.lessonLimits, machineId: row.id }],
+      ),
+      preferences: parsed.flatMap(({ row, state }) =>
+        (state?.preferences ?? []).map((preference) => ({ ...preference, machineId: row.id })),
+      ),
+      preferenceLimits: parsed.flatMap(({ row, state }) =>
+        state === null || state.preferenceLimit === null ? [] : [{ machineId: row.id, limit: state.preferenceLimit }],
+      ),
+    },
+    200,
+  );
+});
+
+app.openapi(listIdeasRoute, async (c) => {
+  const parsed = (await listMachines()).map((row) => ({ row, state: parseMachineState(row) }));
+  return c.json(
+    {
+      ideas: parsed.flatMap(({ row, state }) => (state?.ideas ?? []).map((idea) => ({ ...idea, machineId: row.id }))),
+      limits: parsed.flatMap(({ row, state }) =>
+        (state?.instances ?? []).flatMap((instance) =>
+          instance.ideaLimit === null ? [] : [{ machineId: row.id, instanceId: instance.id, ideaLimit: instance.ideaLimit }],
+        ),
       ),
     },
     200,

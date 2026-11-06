@@ -10,7 +10,7 @@ import { isAdmin } from '../../middleware/admin.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { createApp, jsonError } from '../../shared/openapi.js';
 import agentAdminRoutes from '../agents/admin-routes.js';
-import { countAgentInbox } from '../agents/service.js';
+import { countAgentInbox, countOpenIdeas } from '../agents/service.js';
 import feedbackAdminRoutes from '../feedback/admin-routes.js';
 import { countPendingTickets } from '../feedback/service.js';
 
@@ -28,6 +28,10 @@ const AdminStatusSchema = z
     agentInboxCount: z.number().int().nonnegative().nullable().openapi({
       description: 'agent 待办数：交给你决定的问题与需要你处理的运行；非管理员为 null',
       example: 1,
+    }),
+    agentIdeaCount: z.number().int().nonnegative().nullable().openapi({
+      description: '产品探索还没处理的想法数；非管理员为 null',
+      example: 3,
     }),
   })
   .openapi('AdminStatus');
@@ -49,9 +53,14 @@ const statusRoute = createRoute({
 
 app.openapi(statusRoute, async (c) => {
   if (!isAdmin(c.get('userId'))) {
-    return c.json({ isAdmin: false, pendingTicketCount: null, agentInboxCount: null }, 200);
+    return c.json({ isAdmin: false, pendingTicketCount: null, agentInboxCount: null, agentIdeaCount: null }, 200);
   }
-  return c.json({ isAdmin: true, pendingTicketCount: await countPendingTickets(), agentInboxCount: await countAgentInbox() }, 200);
+  const [pendingTicketCount, agentInboxCount, agentIdeaCount] = await Promise.all([
+    countPendingTickets(),
+    countAgentInbox(),
+    countOpenIdeas(),
+  ]);
+  return c.json({ isAdmin: true, pendingTicketCount, agentInboxCount, agentIdeaCount }, 200);
 });
 
 /** 意见反馈管理：/v1/admin/feedback/... */
