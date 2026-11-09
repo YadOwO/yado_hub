@@ -65,6 +65,23 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal('isDryRun' in (parsed.runs[0] ?? {}), false);
   });
 
+  it('待办的 canDelegate：旧版 agentd 不传时按 false 处理，新版传了照收', () => {
+    const item = {
+      id: 'run-20261109-065042-0682',
+      kind: 'run',
+      instanceId: 'implement-yado-code',
+      runId: '20261109-065042-0682',
+      title: '运行需要你处理',
+      detail: 'yado_ai 的实现改了不许改的文件（AGENTS.md），没有推送；代码留在 worktree 里',
+      severity: null,
+      location: null,
+      runStatus: 'needs_attention',
+      createdAt: '2026-11-09T15:03:01.000Z',
+    };
+    assert.equal(AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [item] }).inbox[0]?.canDelegate, false);
+    assert.equal(AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [{ ...item, canDelegate: true }] }).inbox[0]?.canDelegate, true);
+  });
+
   it('旧版 agentd 没报产品探索的 products 时按 null 处理', () => {
     const parsed = AgentSyncRequestSchema.parse(LEGACY_SYNC);
     assert.equal(parsed.instances[0]?.products, null);

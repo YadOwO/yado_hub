@@ -183,6 +183,10 @@ export const AgentInboxItemSchema = z
     approvalText: z.string().max(AGENT_APPROVAL_TEXT_MAX).nullable().default(null).openapi({
       description: '等你点头时要你看的全文（agentd 已打码）；别的待办为 null',
     }),
+    // 旧版 agentd 不传，按 false 处理：页面上不显示停下来的一次实现的「交给主审」
+    canDelegate: z.boolean().default(false).openapi({
+      description: '能不能交给主审：问题和做完的新功能一直能；停下来的一次实现由 agentd 判断（已开始实现、代码还在、次数没用完）',
+    }),
     createdAt: z.string(),
   })
   .openapi('AgentInboxItem');
