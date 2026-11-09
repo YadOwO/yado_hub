@@ -95,7 +95,6 @@ export const AgentRunSchema = z
       description: 'queued 排队中、running 运行中、succeeded 完成、needs_attention 需要你处理、failed 失败、canceled 已取消、interrupted 被中断',
     }),
     trigger: z.string().openapi({ description: 'schedule 定时、manual 手动、delegate 你把一个问题交给主审决定' }),
-    isDryRun: z.boolean(),
     baseCommit: z.string().nullable(),
     headCommit: z.string().nullable(),
     pushedCommit: z.string().nullable(),
@@ -138,7 +137,6 @@ export const AgentInstanceSchema = z
     schedule: AgentScheduleSchema,
     scheduleText: z.string().openapi({ example: '每天 18:00（Asia/Shanghai）' }),
     isEnabled: z.boolean(),
-    isDryRun: z.boolean().openapi({ description: '演练模式：只出报告，不推送' }),
     allowProtectedBranch: z.boolean().openapi({ description: '是否允许推到会触发部署的分支；只能在 Mac 上改' }),
     maxRounds: z.number().int(),
     models: z.record(z.string(), z.string()).openapi({ description: '这个实例单独指定的模型' }),
@@ -353,6 +351,9 @@ export const MAX_COMMAND_RESULTS = 100;
  *
  * commandResults 是过渡期的兼容字段：旧版 agentd 带着它，并从响应里取指令；新版 agentd 不带，指令只走 POST /claim。
  * 旧版 agentd 都升级后，连同 /check 一起删掉。
+ *
+ * 这里的 object 都不是 strict，多出的字段会被丢掉、不入库：旧版 agentd 还会在实例、运行里带已经删掉的 isDryRun，
+ * 不能因此拒绝整次同步，所以不要给同步的 schema 加 strict。
  */
 export const AgentSyncRequestSchema = AgentMachineStateSchema.extend({
   agentdVersion: z.string().max(40),
@@ -463,7 +464,7 @@ const RoleModelsOverridePatchSchema = z
 
 /**
  * 页面能发的指令（白名单）。参数都是 strict：多出任何字段整条拒绝。
- * agentd 收到后还会按自己的白名单再校验，并且新建的实例一律是演练模式、仓库 owner 必须在 Mac 上的白名单里。
+ * agentd 收到后还会按自己的白名单再校验，仓库 owner 必须在 Mac 上的白名单里。
  */
 export const AgentCommandInputSchema = z
   .discriminatedUnion('type', [
@@ -487,7 +488,6 @@ export const AgentCommandInputSchema = z
           branch: z.string().min(1).optional(),
           schedule: AgentScheduleSchema.optional(),
           isEnabled: z.boolean().optional(),
-          isDryRun: z.boolean().optional(),
           from: z.string().optional(),
           maxRounds: z.number().int().min(1).max(5).optional(),
           models: RoleModelsOverridePatchSchema.optional(),
