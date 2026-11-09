@@ -18,6 +18,7 @@ import {
   type FeedbackTicketRow,
   type FeedbackTicketStatus,
   type IFeedbackClientInfo,
+  type IFeedbackDiagnostic,
 } from '../../db/schema.js';
 import { messageIdConflict, notFound, ticketNotLatest } from '../../shared/errors.js';
 
@@ -36,6 +37,8 @@ export interface INewMessage {
   content: string;
   /** 用户消息附带的设备信息；管理员消息为 null */
   clientInfo: IFeedbackClientInfo | null;
+  /** 用户勾选后附带的 MetricKit 诊断；没有附带或管理员消息为 null */
+  diagnostics: IFeedbackDiagnostic[] | null;
 }
 
 /** 管理端反馈单列表的筛选条件 */
@@ -183,6 +186,7 @@ async function appendMessage(
       sender,
       content: message.content,
       clientInfo: message.clientInfo,
+      diagnostics: message.diagnostics,
     })
     // 其他对话并发写入了同一个 ID：不插入，按冲突处理
     .onConflictDoNothing({ target: feedbackMessages.id })

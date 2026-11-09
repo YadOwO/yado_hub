@@ -1,5 +1,5 @@
 /**
- * 把数据库行转换为对外响应结构：时刻统一转 ISO 8601，用户端不暴露反馈单与设备信息。
+ * 把数据库行转换为对外响应结构：时刻统一转 ISO 8601，用户端不暴露反馈单、设备信息与诊断。
  */
 import type { z } from '@hono/zod-openapi';
 
@@ -37,6 +37,7 @@ export function toAdminMessageDTO(row: FeedbackMessageRow): AdminMessageDTO {
     ...toUserMessageDTO(row),
     ticketId: row.ticketId,
     clientInfo: row.clientInfo,
+    diagnostics: row.diagnostics ?? null,
   };
 }
 

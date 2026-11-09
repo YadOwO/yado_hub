@@ -6,13 +6,19 @@
 import { z } from '@hono/zod-openapi';
 
 import { PRODUCT_CODES } from '../../config/products.js';
-import { FEEDBACK_SENDERS, FEEDBACK_TICKET_STATUSES } from '../../db/schema.js';
+import { FEEDBACK_DIAGNOSTIC_KINDS, FEEDBACK_SENDERS, FEEDBACK_TICKET_STATUSES } from '../../db/schema.js';
 
 /** 单条消息正文的最大长度 */
 export const MESSAGE_MAX_LENGTH = 1000;
 
 /** 管理端列表里最后一条消息摘要的最大长度 */
 export const MESSAGE_PREVIEW_LENGTH = 100;
+
+/** 一条消息最多附带的诊断份数 */
+export const DIAGNOSTICS_MAX_COUNT = 5;
+
+/** callStackTree 文本的最大长度（UTF-16 长度，超长由 App 截断） */
+export const CALL_STACK_TREE_MAX_LENGTH = 128_000;
 
 /** 产品代号 */
 const ProductSchema = z.enum(PRODUCT_CODES).openapi({ description: '产品代号', example: 'yadoa' });
@@ -63,6 +69,27 @@ export const FeedbackClientInfoSchema = z
   })
   .openapi('FeedbackClientInfo');
 
+/** 用户勾选后附带的一份 MetricKit 诊断 */
+export const FeedbackDiagnosticSchema = z
+  .object({
+    kind: z.enum(FEEDBACK_DIAGNOSTIC_KINDS).openapi({
+      description: 'crash 崩溃，hang 卡顿，diskWrite 磁盘写入异常',
+      example: 'crash',
+    }),
+    timestamp: z.iso.datetime().openapi({
+      description: '诊断时间，ISO 8601 UTC，以 Z 结尾',
+      example: '2026-11-09T02:32:00Z',
+    }),
+    osVersion: z.string().trim().min(1).max(64).openapi({ description: '系统版本', example: 'iOS 27.1' }),
+    appVersion: z.string().trim().min(1).max(64).openapi({ description: 'App 版本', example: '1.0.0' }),
+    buildVersion: z.string().trim().min(1).max(64).openapi({ description: '构建号', example: '12' }),
+    callStackTree: z.string().min(1).max(CALL_STACK_TREE_MAX_LENGTH).openapi({
+      description: `MetricKit callStackTree 的 JSON 文本，1–${CALL_STACK_TREE_MAX_LENGTH} 字，超长由 App 截断`,
+      example: '{"callStacks":[]}',
+    }),
+  })
+  .openapi('FeedbackDiagnostic');
+
 /** 消息正文：去掉首尾空白后 1–1000 字 */
 const ContentSchema = z.string().trim().min(1).max(MESSAGE_MAX_LENGTH).openapi({
   description: `纯文本正文，去掉首尾空白后 1–${MESSAGE_MAX_LENGTH} 字`,
@@ -80,6 +107,11 @@ export const SendUserMessageSchema = z
     id: ClientMessageIdSchema,
     content: ContentSchema,
     clientInfo: FeedbackClientInfoSchema,
+    diagnostics: z
+      .array(FeedbackDiagnosticSchema)
+      .max(DIAGNOSTICS_MAX_COUNT)
+      .optional()
+      .openapi({ description: `用户勾选后附带的最近诊断，最多 ${DIAGNOSTICS_MAX_COUNT} 份；不附带时不传` }),
   })
   .openapi('SendFeedbackMessage');
 
@@ -181,6 +213,7 @@ export const AdminConversationSchema = z
 export const AdminMessageSchema = FeedbackMessageSchema.extend({
   ticketId: z.uuid().openapi({ description: '所属反馈单，用于在对话中画分隔线' }),
   clientInfo: FeedbackClientInfoSchema.nullable().openapi({ description: '用户消息附带的设备信息；管理员消息为 null' }),
+  diagnostics: z.array(FeedbackDiagnosticSchema).nullable().openapi({ description: '用户附带的诊断；没有时为 null' }),
 }).openapi('AdminFeedbackMessage');
 
 /** 管理端消息列表，按序号倒序 */

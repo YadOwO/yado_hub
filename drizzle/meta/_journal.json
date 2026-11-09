@@ -15,6 +15,13 @@
       "when": 1793780871114,
       "tag": "0001_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794237004510,
+      "tag": "0002_feedback_diagnostics",
+      "breakpoints": true
     }
   ]
 }

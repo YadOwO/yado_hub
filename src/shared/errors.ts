@@ -14,6 +14,8 @@ export const ErrorCode = {
   Forbidden: 'FORBIDDEN',
   NotFound: 'NOT_FOUND',
   TooManyRequests: 'TOO_MANY_REQUESTS',
+  /** 请求体超过接口允许的大小 */
+  PayloadTooLarge: 'PAYLOAD_TOO_LARGE',
   /** 消息 ID 已被其他对话或另一发送方使用 */
   MessageIdConflict: 'MESSAGE_ID_CONFLICT',
   /** 只能把对话最新一条反馈单改回待处理 */
@@ -25,7 +27,7 @@ export const ErrorCode = {
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 /** 可安全返回给客户端的错误状态码 */
-export type AppErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503;
+export type AppErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 503;
 
 /**
  * 业务异常。抛出后由全局 onError 统一转换为标准错误响应。
@@ -61,6 +63,10 @@ export const forbidden = (message = '没有权限'): AppError => new AppError(40
 
 /** 访问的对话、反馈单不存在时返回 404 */
 export const notFound = (message: string): AppError => new AppError(404, ErrorCode.NotFound, message);
+
+/** 请求体超过接口允许的大小时返回 413 */
+export const payloadTooLarge = (message = '请求体过大'): AppError =>
+  new AppError(413, ErrorCode.PayloadTooLarge, message);
 
 /** 用户调用频率耗尽时返回 429，详情可标识命中的限流规则 */
 export const tooManyRequests = (message: string, details?: unknown): AppError =>

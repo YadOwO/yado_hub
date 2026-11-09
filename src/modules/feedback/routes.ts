@@ -4,9 +4,11 @@
  * 必须登录；只能读写当前用户自己在 {product} 下的对话。发消息额外挂限流。
  */
 import { createRoute } from '@hono/zod-openapi';
+import { bodyLimit } from 'hono/body-limit';
 
 import { requireAuth } from '../../middleware/auth.js';
 import { feedbackMessageRateLimit } from '../../middleware/rate-limit.js';
+import { payloadTooLarge } from '../../shared/errors.js';
 import { createApp, jsonError } from '../../shared/openapi.js';
 import { toUserMessageDTO } from './dto.js';
 import {
@@ -19,6 +21,9 @@ import {
   UnreadCountSchema,
 } from './schemas.js';
 import { countUserUnread, listUserMessages, markUserRead, sendUserMessage } from './service.js';
+
+/** 发消息请求体上限：2 MB，诊断的 callStackTree 可能较大 */
+const SEND_MESSAGE_BODY_MAX_BYTES = 2 * 1024 * 1024;
 
 /** 意见反馈用户端子应用 */
 const app = createApp();
@@ -49,7 +54,16 @@ const sendMessageRoute = createRoute({
   description:
     '第一次发送时创建对话。同一 id 重发时返回已有消息，不重复写入。' +
     '消息归入对话最新一条待处理的反馈单，没有时新开一条。',
-  middleware: [requireAuth, feedbackMessageRateLimit] as const,
+  middleware: [
+    requireAuth,
+    feedbackMessageRateLimit,
+    bodyLimit({
+      maxSize: SEND_MESSAGE_BODY_MAX_BYTES,
+      onError: () => {
+        throw payloadTooLarge();
+      },
+    }),
+  ] as const,
   security: [{ Bearer: [] }],
   request: {
     params: ProductParamsSchema,
@@ -59,6 +73,7 @@ const sendMessageRoute = createRoute({
     200: { description: '已保存的消息', content: { 'application/json': { schema: FeedbackMessageSchema } } },
     400: jsonError('参数校验失败'),
     401: jsonError('未通过身份校验'),
+    413: jsonError('请求体过大'),
     409: jsonError('消息 ID 已被使用，需换一个新 ID'),
     429: jsonError('发送过于频繁，details.rule 为 per_minute 或 per_day'),
   },
@@ -110,8 +125,14 @@ app.openapi(listMessagesRoute, async (c) => {
 
 app.openapi(sendMessageRoute, async (c) => {
   const { product } = c.req.valid('param');
-  const { id, content, clientInfo } = c.req.valid('json');
-  const message = await sendUserMessage(product, c.get('userId'), { id, content, clientInfo });
+  const { id, content, clientInfo, diagnostics } = c.req.valid('json');
+  const message = await sendUserMessage(product, c.get('userId'), {
+    id,
+    content,
+    clientInfo,
+    // 空数组按没附带处理
+    diagnostics: diagnostics !== undefined && diagnostics.length > 0 ? diagnostics : null,
+  });
   return c.json(toUserMessageDTO(message), 200);
 });
 

@@ -186,7 +186,7 @@ app.openapi(listMessagesRoute, async (c) => {
 app.openapi(sendMessageRoute, async (c) => {
   const { id } = c.req.valid('param');
   const body = c.req.valid('json');
-  const message = await sendAdminMessage(id, { id: body.id, content: body.content, clientInfo: null });
+  const message = await sendAdminMessage(id, { id: body.id, content: body.content, clientInfo: null, diagnostics: null });
   return c.json(toAdminMessageDTO(message), 200);
 });
 

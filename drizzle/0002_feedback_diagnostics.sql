@@ -1,0 +1,1 @@
+ALTER TABLE "yado_hub"."feedback_messages" ADD COLUMN "diagnostics" jsonb;

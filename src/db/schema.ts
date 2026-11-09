@@ -42,6 +42,28 @@ export interface IFeedbackClientInfo {
   locale: string;
 }
 
+/** MetricKit 诊断的类型：crash 崩溃，hang 卡顿，diskWrite 磁盘写入异常 */
+export const FEEDBACK_DIAGNOSTIC_KINDS = ['crash', 'hang', 'diskWrite'] as const;
+
+/** MetricKit 诊断的类型 */
+export type FeedbackDiagnosticKind = (typeof FEEDBACK_DIAGNOSTIC_KINDS)[number];
+
+/** 用户勾选后随消息附带的一份 MetricKit 诊断；只含精简后的摘要，原样存储 */
+export interface IFeedbackDiagnostic {
+  /** 诊断类型 */
+  kind: FeedbackDiagnosticKind;
+  /** 诊断时间，ISO 8601 UTC */
+  timestamp: string;
+  /** 系统版本，例如 iOS 27.1 */
+  osVersion: string;
+  /** App 版本（CFBundleShortVersionString），例如 1.0.0 */
+  appVersion: string;
+  /** 构建号，例如 12 */
+  buildVersion: string;
+  /** MetricKit callStackTree 的 JSON 文本；不解析，原样存储与展示 */
+  callStackTree: string;
+}
+
 /**
  * 反馈对话：每个用户在每个产品下一行，用户端始终只看到这一个对话。
  */
@@ -119,6 +141,8 @@ export const feedbackMessages = yadoHubSchema.table(
     content: text('content').notNull(),
     /** 用户消息附带的设备信息；管理员消息为空 */
     clientInfo: jsonb('client_info').$type<IFeedbackClientInfo>(),
+    /** 用户勾选后随消息附带的 MetricKit 诊断；没有附带或管理员消息为空 */
+    diagnostics: jsonb('diagnostics').$type<IFeedbackDiagnostic[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
