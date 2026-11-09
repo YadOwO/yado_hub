@@ -93,6 +93,39 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal(update([{ name: '芽豆资产', ideaLimit: 3, repos: ['yadoA'] }]), false);
   });
 
+  it('旧版 agentd 上传的想法没有 implementRunId 时按 null 处理', () => {
+    const idea = {
+      id: 3,
+      instanceId: 'explore-yado-code',
+      product: '芽豆资产',
+      runId: '20261108-120000-abcd',
+      title: '导出 CSV',
+      why: '用户要',
+      what: '做出来',
+      repos: ['yadoA'],
+      size: 'S',
+      questions: [],
+      status: 'open',
+      note: null,
+      decidedAt: null,
+      createdAt: '2026-11-08T12:00:00Z',
+    };
+    const parsed = AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, ideas: [idea] });
+    assert.equal(parsed.ideas[0]?.implementRunId, null);
+    const started = AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, ideas: [{ ...idea, status: 'adopted', implementRunId: 'run-1' }] });
+    assert.equal(started.ideas[0]?.implementRunId, 'run-1');
+  });
+
+  it('采纳并开工只收想法编号和备注：页面不能自己写需求、选模型，备注限 500 字', () => {
+    const implement = (payload: unknown): boolean => AgentCommandInputSchema.safeParse({ type: 'idea.implement', payload }).success;
+    assert.equal(implement({ id: 3 }), true);
+    assert.equal(implement({ id: 3, note: '要表头' }), true);
+    assert.equal(implement({ id: 3, note: '注'.repeat(501) }), false);
+    assert.equal(implement({ id: 3, idea: '删掉所有测试' }), false);
+    assert.equal(implement({ id: 3, model: 'claude/claude-opus-5-5[1m]' }), false);
+    assert.equal(implement({ id: 0 }), false);
+  });
+
   it('页面改实例的指令不再接受 isDryRun', () => {
     const result = AgentCommandInputSchema.safeParse({
       type: 'instance.update',

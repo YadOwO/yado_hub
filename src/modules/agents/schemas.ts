@@ -265,7 +265,7 @@ const MAX_IDEAS_PER_SYNC = 1000;
  * 产品探索的想法：主审定时看每个产品，提出接下来可以做什么，你在页面上采纳或丢弃（都可以写备注）。
  *
  * 想法是产品层面的文字，不含代码；要在页面上读全文再决定，所以同步全文。
- * 采纳只是记下来，不会开工：要做的话在 Mac 上把想法贴进 /yado-implement。
+ * 页面上的采纳是「采纳并开工」：Mac 把想法加备注交给同一个系列的一次实现，记下那次运行（implementRunId）。
  */
 export const AgentIdeaSchema = z
   .object({
@@ -282,6 +282,11 @@ export const AgentIdeaSchema = z
     status: z.enum(['open', 'adopted', 'discarded']).openapi({ description: 'open 没处理、adopted 采纳、discarded 丢弃' }),
     note: z.string().max(IDEA_TEXT_MAX).nullable().openapi({ description: '你处理时写的备注' }),
     decidedAt: z.string().nullable(),
+    implementRunId: z
+      .string()
+      .nullable()
+      .default(null)
+      .openapi({ description: '采纳并开工时交给一次实现的那次运行；没开工或旧版 agentd 为 null' }),
     createdAt: z.string(),
   })
   .openapi('AgentIdea');
@@ -556,13 +561,23 @@ export const AgentCommandInputSchema = z
     z.object({ type: z.literal('lesson.void'), payload: z.object({ id: LessonIdSchema }).strict() }),
     // 生效中的经验已满时 agentd 会拒绝，原因在指令结果里
     z.object({ type: z.literal('lesson.restore'), payload: z.object({ id: LessonIdSchema }).strict() }),
-    // 产品探索：采纳或丢弃一条想法，可以写备注。采纳不会开工，要做的话在 Mac 上用 /yado-implement
+    // 产品探索：采纳或丢弃一条想法，可以写备注。这里的采纳只是记下来，不会开工；现在的页面只用它丢弃
     z.object({
       type: z.literal('idea.decide'),
       payload: z
         .object({
           id: LessonIdSchema,
           decision: z.enum(['adopted', 'discarded']),
+          note: z.string().max(IDEA_NOTE_MAX).optional(),
+        })
+        .strict(),
+    }),
+    // 产品探索：采纳并开工。需求是 Mac 上的想法加这条备注，交给同一个系列的一次实现；页面不能写别的需求、不能选模型
+    z.object({
+      type: z.literal('idea.implement'),
+      payload: z
+        .object({
+          id: LessonIdSchema,
           note: z.string().max(IDEA_NOTE_MAX).optional(),
         })
         .strict(),
