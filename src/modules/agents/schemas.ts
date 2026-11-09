@@ -127,6 +127,14 @@ const AgentLastRunSchema = z.object({
   finishedAt: z.string().nullable(),
 });
 
+/** 产品探索里一个产品的想法上限，按产品名对应 PROJECTS.md 的「产品」表 */
+const AgentProductLimitSchema = z
+  .object({
+    name: z.string(),
+    ideaLimit: z.number().int().openapi({ description: '这个产品最多几条没处理的想法' }),
+  })
+  .openapi('AgentProductLimit');
+
 /** 实例：流程类型 + 仓库 + 开发分支 + 调度 */
 export const AgentInstanceSchema = z
   .object({
@@ -145,7 +153,10 @@ export const AgentInstanceSchema = z
     checks: z.array(z.string()),
     lastRun: AgentLastRunSchema.nullable(),
     // 旧版 agentd 不传，按 null 处理
-    ideaLimit: z.number().int().nullable().default(null).openapi({ description: '产品探索：每个产品最多几条没处理的想法；别的流程为 null' }),
+    ideaLimit: z.number().int().nullable().default(null).openapi({ description: '产品探索：没单独设上限的产品最多几条没处理的想法；别的流程为 null' }),
+    products: z.array(AgentProductLimitSchema).nullable().default(null).openapi({
+      description: '产品探索：PROJECTS.md 里的全部产品，按页面上排的先后，带各自的想法上限；别的流程为 null',
+    }),
     isWebEnabled: z.boolean().nullable().default(null).openapi({ description: '产品探索：主审能不能上网；别的流程为 null' }),
   })
   .openapi('AgentInstance');
@@ -446,6 +457,19 @@ const IDEA_NOTE_MAX = 500;
 /** 每个产品没处理的想法上限最大能设到几，与 agentd 一致 */
 const IDEA_LIMIT_MAX = 10;
 
+/** 产品探索的实例上最多记几个产品的先后和上限，与 agentd 一致 */
+const PRODUCT_SETTINGS_MAX = 30;
+
+/** 页面改产品探索各产品的先后和上限：数组顺序就是先后，产品名不能重复 */
+const ProductSettingsPatchSchema = z
+  .array(
+    z
+      .object({ name: z.string().trim().min(1).max(100), ideaLimit: z.number().int().min(1).max(IDEA_LIMIT_MAX) })
+      .strict(),
+  )
+  .max(PRODUCT_SETTINGS_MAX)
+  .refine((items) => new Set(items.map((item) => item.name)).size === items.length, { message: '产品名不能重复' });
+
 /** 全局设置里各角色的默认模型：只写要改的角色 */
 const RoleModelsPatchSchema = z
   .object({ reviewer: z.string().min(1), lead: z.string().min(1), fixer: z.string().min(1) })
@@ -491,8 +515,9 @@ export const AgentCommandInputSchema = z
           from: z.string().optional(),
           maxRounds: z.number().int().min(1).max(5).optional(),
           models: RoleModelsOverridePatchSchema.optional(),
-          // 产品探索：每个产品最多几条没处理的想法、主审能不能上网
+          // 产品探索：没单独设上限的产品最多几条没处理的想法、各产品的先后和上限（整张替换）、主审能不能上网
           ideaLimit: z.number().int().min(1).max(IDEA_LIMIT_MAX).optional(),
+          products: ProductSettingsPatchSchema.optional(),
           isWebEnabled: z.boolean().optional(),
         })
         .strict(),
@@ -662,8 +687,17 @@ export const AgentIdeaListSchema = z
   .object({
     ideas: z.array(AgentIdeaItemSchema).openapi({ description: '全部机器的想法：没处理的全部，已处理的只有最近一部分' }),
     limits: z
-      .array(z.object({ machineId: z.string(), instanceId: z.string(), ideaLimit: z.number().int() }))
-      .openapi({ description: '各产品探索实例每个产品没处理想法的上限' }),
+      .array(
+        z.object({
+          machineId: z.string(),
+          instanceId: z.string(),
+          ideaLimit: z.number().int().openapi({ description: '没单独设上限的产品用这个' }),
+          products: z.array(AgentProductLimitSchema).openapi({
+            description: '全部产品按页面上排的先后，带各自的上限；旧版 agentd 没报时为空数组',
+          }),
+        }),
+      )
+      .openapi({ description: '各产品探索实例每个产品没处理想法的上限与产品的先后' }),
   })
   .openapi('AgentIdeaList');
 

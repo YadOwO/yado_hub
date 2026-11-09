@@ -65,6 +65,34 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal('isDryRun' in (parsed.runs[0] ?? {}), false);
   });
 
+  it('旧版 agentd 没报产品探索的 products 时按 null 处理', () => {
+    const parsed = AgentSyncRequestSchema.parse(LEGACY_SYNC);
+    assert.equal(parsed.instances[0]?.products, null);
+  });
+
+  it('页面改产品探索各产品的先后和上限：整张替换；产品名重复、上限越界、多出字段都拒绝', () => {
+    const update = (products: unknown): boolean =>
+      AgentCommandInputSchema.safeParse({ type: 'instance.update', payload: { id: 'explore-yado-code', products } }).success;
+    assert.equal(
+      update([
+        { name: '芽豆资产', ideaLimit: 5 },
+        { name: '芽豆有物', ideaLimit: 3 },
+      ]),
+      true,
+    );
+    assert.equal(
+      update([
+        { name: '芽豆资产', ideaLimit: 5 },
+        { name: '芽豆资产', ideaLimit: 3 },
+      ]),
+      false,
+    );
+    assert.equal(update([{ name: '芽豆资产', ideaLimit: 11 }]), false);
+    assert.equal(update([{ name: '芽豆资产', ideaLimit: 0 }]), false);
+    assert.equal(update([{ name: '', ideaLimit: 3 }]), false);
+    assert.equal(update([{ name: '芽豆资产', ideaLimit: 3, repos: ['yadoA'] }]), false);
+  });
+
   it('页面改实例的指令不再接受 isDryRun', () => {
     const result = AgentCommandInputSchema.safeParse({
       type: 'instance.update',

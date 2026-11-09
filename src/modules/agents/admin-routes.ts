@@ -297,7 +297,9 @@ app.openapi(listIdeasRoute, async (c) => {
       ideas: parsed.flatMap(({ row, state }) => (state?.ideas ?? []).map((idea) => ({ ...idea, machineId: row.id }))),
       limits: parsed.flatMap(({ row, state }) =>
         (state?.instances ?? []).flatMap((instance) =>
-          instance.ideaLimit === null ? [] : [{ machineId: row.id, instanceId: instance.id, ideaLimit: instance.ideaLimit }],
+          instance.ideaLimit === null
+            ? []
+            : [{ machineId: row.id, instanceId: instance.id, ideaLimit: instance.ideaLimit, products: instance.products ?? [] }],
         ),
       ),
     },
