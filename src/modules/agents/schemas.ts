@@ -196,10 +196,22 @@ export const AgentSettingsSchema = z
   .object({
     maxConcurrentRuns: z.number().int(),
     models: z.object({ reviewer: z.string(), lead: z.string(), fixer: z.string() }),
+    // 各模型单独选的思考强度（模型 ID → 强度）；旧版 agentd 不传
+    thinking: z.record(z.string(), z.string()).default({}),
     retentionDays: z.number().int(),
     pausedFlows: z.array(z.string()),
   })
   .openapi('AgentSettings');
+
+/** 一个模型的思考强度：可选项、没单独选时的默认、实际会用的 */
+export const AgentModelThinkingSchema = z
+  .object({
+    id: z.string(),
+    options: z.array(z.string()).max(20),
+    defaultThinking: z.string().nullable(),
+    thinking: z.string().nullable(),
+  })
+  .openapi('AgentModelThinking');
 
 /** 流程类型 */
 export const AgentFlowSchema = z
@@ -329,6 +341,8 @@ export const AgentMachineStateSchema = z.object({
   health: AgentHealthSchema,
   settings: AgentSettingsSchema,
   models: z.array(z.string()),
+  // 旧版 agentd 不传，按没有思考强度可选处理
+  modelThinking: z.array(AgentModelThinkingSchema).max(100).default([]),
   flows: z.array(AgentFlowSchema),
   instances: z.array(AgentInstanceSchema).max(200),
   inbox: z.array(AgentInboxItemSchema).max(500),
@@ -540,6 +554,10 @@ export const AgentCommandInputSchema = z
         .object({
           maxConcurrentRuns: z.number().int().min(1).max(8),
           models: RoleModelsPatchSchema,
+          // 按模型改思考强度：只写要改的模型，null 表示改回默认；档位对不对由 agentd 按 Paseo 配置检查
+          thinking: z
+            .record(z.string().min(1).max(200), z.string().min(1).max(40).nullable())
+            .refine((value) => Object.keys(value).length <= 50, { message: '一次最多改 50 个模型' }),
           retentionDays: z.number().int().min(1).max(90),
           pausedFlows: z.array(z.string()),
         })
@@ -626,6 +644,7 @@ export const AgentMachineSchema = z
     health: AgentHealthSchema.nullable(),
     settings: AgentSettingsSchema.nullable(),
     models: z.array(z.string()),
+    modelThinking: z.array(AgentModelThinkingSchema),
     flows: z.array(AgentFlowSchema),
   })
   .openapi('AgentMachine');

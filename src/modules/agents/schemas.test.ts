@@ -143,6 +143,16 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal(implement({ id: 0 }), false);
   });
 
+  it('思考强度：旧版 agentd 不传时按空处理；页面按模型改，null 改回默认', () => {
+    const parsed = AgentSyncRequestSchema.parse(LEGACY_SYNC);
+    assert.deepEqual(parsed.settings.thinking, {});
+    assert.deepEqual(parsed.modelThinking, []);
+    const update = (payload: unknown): boolean => AgentCommandInputSchema.safeParse({ type: 'settings.update', payload }).success;
+    assert.equal(update({ thinking: { 'claude/claude-opus-5-5[1m]': 'max' } }), true);
+    assert.equal(update({ thinking: { 'claude/claude-opus-5-5[1m]': null } }), true);
+    assert.equal(update({ thinking: { 'claude/claude-opus-5-5[1m]': '' } }), false);
+  });
+
   it('页面改实例的指令不再接受 isDryRun', () => {
     const result = AgentCommandInputSchema.safeParse({
       type: 'instance.update',

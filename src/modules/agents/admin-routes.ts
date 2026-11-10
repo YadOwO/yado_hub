@@ -242,6 +242,7 @@ app.openapi(overviewRoute, async (c) => {
         health: state?.health ?? null,
         settings: state?.settings ?? null,
         models: state?.models ?? [],
+        modelThinking: state?.modelThinking ?? [],
         flows: state?.flows ?? [],
       })),
       instances: parsed.flatMap(({ row, state }) =>

@@ -127,6 +127,7 @@ export async function applySync(
     health: input.health,
     settings: input.settings,
     models: input.models,
+    modelThinking: input.modelThinking,
     flows: input.flows,
     instances: input.instances,
     inbox: input.inbox,
