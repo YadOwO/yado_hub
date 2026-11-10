@@ -82,6 +82,34 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal(AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [{ ...item, canDelegate: true }] }).inbox[0]?.canDelegate, true);
   });
 
+  it('运行的 topic、activity 和步骤的 label：旧版 agentd 不传时按 null 处理，新版传了照收', () => {
+    const step = {
+      key: 'r1.triage',
+      kind: 'model',
+      round: 1,
+      role: 'lead',
+      model: 'claude/claude-opus-5-5[1m]',
+      status: 'running',
+      error: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      startedAt: '2026-11-08T12:00:00Z',
+      finishedAt: null,
+    };
+    const legacyRun = LEGACY_SYNC.runs[0];
+    const legacy = AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, runs: [{ ...legacyRun, steps: [step] }] }).runs[0];
+    assert.equal(legacy?.topic, null);
+    assert.equal(legacy?.activity, null);
+    assert.equal(legacy?.steps[0]?.label, null);
+    const fresh = AgentSyncRequestSchema.parse({
+      ...LEGACY_SYNC,
+      runs: [{ ...legacyRun, topic: '加注销账号', activity: '第 1 轮 · 主审判断（claude-opus-5-5）', steps: [{ ...step, label: '第 1 轮 · 主审判断' }] }],
+    }).runs[0];
+    assert.equal(fresh?.topic, '加注销账号');
+    assert.equal(fresh?.activity, '第 1 轮 · 主审判断（claude-opus-5-5）');
+    assert.equal(fresh?.steps[0]?.label, '第 1 轮 · 主审判断');
+  });
+
   it('旧版 agentd 没报产品探索的 products 时按 null 处理', () => {
     const parsed = AgentSyncRequestSchema.parse(LEGACY_SYNC);
     assert.equal(parsed.instances[0]?.products, null);

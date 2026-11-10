@@ -42,6 +42,8 @@ export const AgentScheduleSchema = z
 export const AgentStepSchema = z
   .object({
     key: z.string().openapi({ example: 'r1.triage' }),
+    // 旧版 agentd 不传，按 null 处理，页面上显示 key
+    label: z.string().nullable().default(null).openapi({ description: '步骤的中文名，例如「第 1 轮 · 主审判断」' }),
     kind: z.string().openapi({ description: 'agentd 自己做的（agentd）或调用模型的（model）' }),
     round: z.number().int(),
     role: z.string().nullable().openapi({ description: 'reviewer、lead、fixer' }),
@@ -109,6 +111,17 @@ export const AgentRunSchema = z
     acknowledgedAt: z.string().nullable(),
     // 旧版 agentd 不传，按 null 处理
     delegatedFrom: z.string().nullable().default(null).openapi({ description: '交给主审的运行：那个问题所在的运行' }),
+    // 下面两个旧版 agentd 不传，按 null 处理
+    topic: z
+      .string()
+      .nullable()
+      .default(null)
+      .openapi({ description: '这次做什么：一次实现的需求标题、交给主审的问题、发哪些仓库等；定时的 review、清理、探索为 null' }),
+    activity: z
+      .string()
+      .nullable()
+      .default(null)
+      .openapi({ description: '现在在干什么：运行中是当前步骤，排队中是在等什么；结束了为 null' }),
     steps: z.array(AgentStepSchema),
     findings: z.array(AgentFindingSchema),
   })
@@ -336,6 +349,8 @@ const AgentHealthSchema = z.object({
   detail: z.string(),
   activeRuns: z.number().int(),
   queuedRuns: z.number().int(),
+  // 旧版 agentd 不传，按 0 处理
+  waitingRuns: z.number().int().default(0).openapi({ description: '等你点头的运行数' }),
 });
 
 /** 机器的快照：每次同步整体替换 */
