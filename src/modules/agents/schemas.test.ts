@@ -131,6 +131,15 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal(parsed.ideas[0]?.implementRunId, null);
     const started = AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, ideas: [{ ...idea, status: 'adopted', implementRunId: 'run-1' }] });
     assert.equal(started.ideas[0]?.implementRunId, 'run-1');
+    const done = AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, ideas: [{ ...idea, status: 'done', note: '自己做了' }] });
+    assert.equal(done.ideas[0]?.status, 'done');
+  });
+
+  it('已实现：页面用 idea.decide 标成 done，可以带备注', () => {
+    const decide = (payload: unknown): boolean => AgentCommandInputSchema.safeParse({ type: 'idea.decide', payload }).success;
+    assert.equal(decide({ id: 3, decision: 'done' }), true);
+    assert.equal(decide({ id: 3, decision: 'done', note: '自己做了' }), true);
+    assert.equal(decide({ id: 3, decision: 'open' }), false);
   });
 
   it('采纳并开工只收想法编号和备注：页面不能自己写需求、选模型，备注限 500 字', () => {

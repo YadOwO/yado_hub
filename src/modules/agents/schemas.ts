@@ -278,7 +278,7 @@ const IDEA_TEXT_MAX = 4000;
 const MAX_IDEAS_PER_SYNC = 1000;
 
 /**
- * 产品探索的想法：主审定时看每个产品，提出接下来可以做什么，你在页面上采纳或丢弃（都可以写备注）。
+ * 产品探索的想法：主审定时看每个产品，提出接下来可以做什么，你在页面上采纳、丢弃，或者自己做完了标成已实现（都可以写备注）。
  *
  * 想法是产品层面的文字，不含代码；要在页面上读全文再决定，所以同步全文。
  * 页面上的采纳是「采纳并开工」：Mac 把想法加备注交给同一个系列的一次实现，记下那次运行（implementRunId）。
@@ -295,7 +295,9 @@ export const AgentIdeaSchema = z
     repos: z.array(z.string()).max(20).openapi({ description: '涉及的仓库目录名' }),
     size: z.enum(['S', 'M', 'L']).openapi({ description: 'S 半天内、M 一两天、L 更大' }),
     questions: z.array(z.string().max(IDEA_TEXT_MAX)).max(10).openapi({ description: '要你拿主意的问题' }),
-    status: z.enum(['open', 'adopted', 'discarded']).openapi({ description: 'open 没处理、adopted 采纳、discarded 丢弃' }),
+    status: z
+      .enum(['open', 'adopted', 'discarded', 'done'])
+      .openapi({ description: 'open 没处理、adopted 采纳、discarded 丢弃、done 你自己实现了（没走流程）' }),
     note: z.string().max(IDEA_TEXT_MAX).nullable().openapi({ description: '你处理时写的备注' }),
     decidedAt: z.string().nullable(),
     implementRunId: z
@@ -583,13 +585,13 @@ export const AgentCommandInputSchema = z
     z.object({ type: z.literal('lesson.void'), payload: z.object({ id: LessonIdSchema }).strict() }),
     // 生效中的经验已满时 agentd 会拒绝，原因在指令结果里
     z.object({ type: z.literal('lesson.restore'), payload: z.object({ id: LessonIdSchema }).strict() }),
-    // 产品探索：采纳或丢弃一条想法，可以写备注。这里的采纳只是记下来，不会开工；现在的页面只用它丢弃
+    // 产品探索：采纳、丢弃或标成已实现（你自己做了，没走流程），可以写备注。这里的采纳只是记下来，不会开工；现在的页面只用它丢弃和标已实现
     z.object({
       type: z.literal('idea.decide'),
       payload: z
         .object({
           id: LessonIdSchema,
-          decision: z.enum(['adopted', 'discarded']),
+          decision: z.enum(['adopted', 'discarded', 'done']),
           note: z.string().max(IDEA_NOTE_MAX).optional(),
         })
         .strict(),

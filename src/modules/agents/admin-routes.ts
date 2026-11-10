@@ -177,7 +177,7 @@ const listIdeasRoute = createRoute({
   summary: '产品探索的想法',
   description:
     '全部机器的想法（全文）与各实例每个产品的上限，是 Mac 最近一次上传时的状态。' +
-    '页面上采纳并开工（指令 idea.implement，交给同一个系列的一次实现）或丢弃（指令 idea.decide），都可以写备注。',
+    '页面上采纳并开工（指令 idea.implement，交给同一个系列的一次实现）、丢弃或标成已实现（指令 idea.decide），都可以写备注。',
   middleware: [requireAuth, requireAdmin] as const,
   security: [{ Bearer: [] }],
   responses: {
