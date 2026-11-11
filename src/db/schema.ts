@@ -120,7 +120,7 @@ export const feedbackTickets = yadoHubSchema.table(
 );
 
 /**
- * 反馈消息：只追加，不修改、不删除。
+ * 反馈消息：只追加，不修改；只在用户注销账号时随对话整段删除。
  *
  * seq 用自增序号，既作为主键也作为排序、已读位置与分页游标；id 由客户端生成，网络重发时据此去重。
  */
@@ -153,6 +153,29 @@ export const feedbackMessages = yadoHubSchema.table(
   ],
 );
 
+/**
+ * 用户注销时反馈单的匿名统计：只记产品、状态、时间，不含用户和正文，没有读取接口。
+ *
+ * 故意不存 userId、对话 ID、原反馈单 ID，也不存删除时间，避免能和某个账号关联上；id 是新生成的。
+ */
+export const feedbackAnonymizedTickets = yadoHubSchema.table(
+  'feedback_anonymized_tickets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** 产品代号 */
+    product: text('product').notNull(),
+    /** 注销时反馈单的状态 */
+    status: text('status', { enum: FEEDBACK_TICKET_STATUSES }).notNull(),
+    /** 原反馈单的开单时间，不设默认值 */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    /** 原反馈单最近一次标记已处理的时间；待处理时为空 */
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    /** 原反馈单最新一条消息的时间 */
+    lastMessageAt: timestamp('last_message_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [check('feedback_anonymized_tickets_status_check', sql`${table.status} in ('pending', 'resolved')`)],
+);
+
 /** 对话行 */
 export type FeedbackConversationRow = typeof feedbackConversations.$inferSelect;
 
@@ -161,6 +184,12 @@ export type FeedbackTicketRow = typeof feedbackTickets.$inferSelect;
 
 /** 消息行 */
 export type FeedbackMessageRow = typeof feedbackMessages.$inferSelect;
+
+/** 注销后保留的匿名反馈单统计行 */
+export type FeedbackAnonymizedTicketRow = typeof feedbackAnonymizedTickets.$inferSelect;
+
+/** 新增匿名反馈单统计行所需的字段 */
+export type NewFeedbackAnonymizedTicket = typeof feedbackAnonymizedTickets.$inferInsert;
 
 /**
  * 指令状态：pending 等 Mac 取走，sent 已送到 Mac 等结果，succeeded / failed 已执行，

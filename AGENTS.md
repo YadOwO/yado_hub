@@ -60,6 +60,7 @@ modules/<功能>/service.ts        数据读写与业务规则
 modules/<功能>/routes.ts         用户端路由，挂在 /v1/<功能> 下，产品代号作为路径参数 {product}
 modules/<功能>/admin-routes.ts   管理端路由，由 modules/admin 挂到 /v1/admin/<功能>
 modules/admin/index.ts          管理端汇总与管理入口状态，可以引用各功能的 service
+modules/account/routes.ts       注销账号 DELETE /v1/account，汇总调用各功能的用户数据删除，可以引用各功能的 service
 config/products.ts              已接入的产品代号
 db/                             Drizzle 表定义（yado_hub schema）与连接池
 shared/                         跨功能通用能力
@@ -69,7 +70,7 @@ middleware/                     请求级横切逻辑（鉴权、管理员、限
 - 新增功能：建 `modules/<功能>/`，在 `app.ts` 中加一行 `app.route('/v1/<功能>', ...)`；有管理端时在
   `modules/admin/index.ts` 中加一行 route。
 - 接入新产品：在 `config/products.ts` 的 `PRODUCT_CODES` 中加一项，不需要改功能代码。
-- 功能之间不互相 import（`modules/admin` 除外），需要复用的逻辑下沉到 `shared/`。
+- 功能之间不互相 import（汇总各功能的 `modules/admin`、`modules/account` 除外），需要复用的逻辑下沉到 `shared/`。
 
 ## 接口约定
 

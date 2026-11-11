@@ -2,13 +2,15 @@
  * 应用组装。
  *
  * modules/ 下每个功能一个文件夹（feedback……），用户端路由挂在 /v1/<功能> 下，产品代号作为路径参数；
- * 管理端路由统一经 modules/admin 挂在 /v1/admin 下。功能之间不互相引用，需要复用的逻辑下沉到 shared/。
+ * 管理端路由统一经 modules/admin 挂在 /v1/admin 下。功能之间不互相引用（汇总各功能的 modules/admin、
+ * modules/account 除外），需要复用的逻辑下沉到 shared/。
  */
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 
 import { env } from './config/env.js';
 import { pingDb } from './db/index.js';
+import accountRoutes from './modules/account/routes.js';
 import adminRoutes from './modules/admin/index.js';
 import agentRoutes from './modules/agents/routes.js';
 import feedbackRoutes from './modules/feedback/routes.js';
@@ -66,6 +68,8 @@ app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
 
 // 鉴权挂在各路由的 middleware 字段上，不在此处用 app.use。
 app.route('/v1/feedback', feedbackRoutes);
+// 注销账号，删除当前用户在各功能的数据
+app.route('/v1/account', accountRoutes);
 // agent 同步接口用机器凭证鉴权，只给 Mac 上的 agentd 用；管理端在 /v1/admin/agents
 app.route('/v1/agents', agentRoutes);
 app.route('/v1/admin', adminRoutes);

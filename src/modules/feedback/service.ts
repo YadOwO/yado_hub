@@ -3,12 +3,14 @@
  *
  * 用户端函数都显式接收产品与 userId，查询一律按用户过滤；管理端函数按 ID 访问，权限由路由层把关。
  * 写消息、改状态都先锁住所属对话行，同一对话的写操作串行执行，保证「最多一单待处理」与消息去重成立。
+ * 用户注销时整段删除该用户全部产品下的反馈。
  */
 import { and, asc, desc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
 import type { ProductCode } from '../../config/products.js';
 import { db, type DbTransaction } from '../../db/index.js';
 import {
+  feedbackAnonymizedTickets,
   feedbackConversations,
   feedbackMessages,
   feedbackTickets,
@@ -21,6 +23,7 @@ import {
   type IFeedbackDiagnostic,
 } from '../../db/schema.js';
 import { messageIdConflict, notFound, ticketNotLatest } from '../../shared/errors.js';
+import { deleteUserFeedback, type IUserFeedbackDeletionOps } from './account-deletion.js';
 
 /** 一页数据与下一页游标 */
 export interface IPage<T> {
@@ -404,4 +407,50 @@ export async function updateTicketStatus(ticketId: string, status: FeedbackTicke
 /** 全部产品的待处理反馈单数 */
 export async function countPendingTickets(): Promise<number> {
   return db.$count(feedbackTickets, eq(feedbackTickets.status, 'pending'));
+}
+
+// ---------------------------------------------------------------------------
+// 注销账号
+// ---------------------------------------------------------------------------
+
+/**
+ * 删除用户在所有产品下的反馈：先把反馈单匿名后存进 feedback_anonymized_tickets，
+ * 再按 消息 → 反馈单 → 对话 的外键顺序删除。整个过程在一个事务里，任何一步失败都整体回滚。
+ *
+ * 对话按 id 排序后加锁，和发消息、管理员回复、改状态的「先锁对话行」串行，避免死锁。
+ *
+ * @returns 删除的对话数；用户没有反馈数据时为 0
+ */
+export async function deleteUserFeedbackData(userId: string): Promise<number> {
+  return db.transaction(async (tx) => {
+    const ops: IUserFeedbackDeletionOps = {
+      lockUserConversations: (id) =>
+        tx
+          .select({ id: feedbackConversations.id, product: feedbackConversations.product })
+          .from(feedbackConversations)
+          .where(eq(feedbackConversations.userId, id))
+          .orderBy(asc(feedbackConversations.id))
+          .for('update'),
+      listTickets: (conversationIds) =>
+        tx
+          .select({
+            conversationId: feedbackTickets.conversationId,
+            status: feedbackTickets.status,
+            createdAt: feedbackTickets.createdAt,
+            resolvedAt: feedbackTickets.resolvedAt,
+            lastMessageAt: feedbackTickets.lastMessageAt,
+          })
+          .from(feedbackTickets)
+          .where(inArray(feedbackTickets.conversationId, conversationIds)),
+      saveAnonymizedTickets: async (rows) => {
+        await tx.insert(feedbackAnonymizedTickets).values(rows);
+      },
+      deleteConversations: async (conversationIds) => {
+        await tx.delete(feedbackMessages).where(inArray(feedbackMessages.conversationId, conversationIds));
+        await tx.delete(feedbackTickets).where(inArray(feedbackTickets.conversationId, conversationIds));
+        await tx.delete(feedbackConversations).where(inArray(feedbackConversations.id, conversationIds));
+      },
+    };
+    return deleteUserFeedback(userId, ops);
+  });
 }
