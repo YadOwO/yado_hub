@@ -588,7 +588,7 @@ export const AgentCommandInputSchema = z
           itemId: IdSchema,
           // delegate：交给主审在修和不修里选一个，Mac 上另开一次运行
           // revise：做完的新功能按备注修改，同一次实现在 Mac 上重新排队，改完推回同一个 feat 分支；备注必填由 Mac 校验
-          // verify：做完的新功能派人过一遍，Mac 上另开一次运行，验完结果回到这条待办；备注可选
+          // verify：做完的新功能派 agent 过一遍，Mac 上另开一次运行，验完结果回到这条待办；备注可选
           // approve / reject：同意或拒绝等你点头的运行（发布）；页面只能点头，不能改计划和命令
           action: z.enum(['wontfix', 'done', 'delegate', 'revise', 'verify', 'approve', 'reject']),
           // 交给主审、同意或拒绝时补充的信息；交给主审时会写进给主审看的材料
