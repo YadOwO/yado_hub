@@ -176,6 +176,18 @@ export const feedbackAnonymizedTickets = yadoHubSchema.table(
   (table) => [check('feedback_anonymized_tickets_status_check', sql`${table.status} in ('pending', 'resolved')`)],
 );
 
+/**
+ * 注销墓碑：用户注销账号时写入，在过期前拒绝该用户再写反馈，防止注销与并发发消息交错后残留数据。
+ *
+ * 只存 userId 的 sha256 和过期时间，不存原始 userId 和其他资料；过期行在下次注销时顺带清理。
+ */
+export const feedbackDeletedUsers = yadoHubSchema.table('feedback_deleted_users', {
+  /** userId 的 sha256，64 位小写十六进制 */
+  userHash: text('user_hash').primaryKey(),
+  /** 墓碑过期时间，过期后该用户（若 Logto 账号仍在）可以再发反馈 */
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+
 /** 对话行 */
 export type FeedbackConversationRow = typeof feedbackConversations.$inferSelect;
 
@@ -190,6 +202,9 @@ export type FeedbackAnonymizedTicketRow = typeof feedbackAnonymizedTickets.$infe
 
 /** 新增匿名反馈单统计行所需的字段 */
 export type NewFeedbackAnonymizedTicket = typeof feedbackAnonymizedTickets.$inferInsert;
+
+/** 注销墓碑行 */
+export type FeedbackDeletedUserRow = typeof feedbackDeletedUsers.$inferSelect;
 
 /**
  * 指令状态：pending 等 Mac 取走，sent 已送到 Mac 等结果，succeeded / failed 已执行，

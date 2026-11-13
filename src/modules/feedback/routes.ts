@@ -53,7 +53,7 @@ const sendMessageRoute = createRoute({
   summary: '发送反馈消息',
   description:
     '第一次发送时创建对话。同一 id 重发时返回已有消息，不重复写入。' +
-    '消息归入对话最新一条待处理的反馈单，没有时新开一条。',
+    '消息归入对话最新一条待处理的反馈单，没有时新开一条。注销账号后一段时间内返回 403 ACCOUNT_DELETED。',
   middleware: [
     requireAuth,
     feedbackMessageRateLimit,
@@ -73,6 +73,7 @@ const sendMessageRoute = createRoute({
     200: { description: '已保存的消息', content: { 'application/json': { schema: FeedbackMessageSchema } } },
     400: jsonError('参数校验失败'),
     401: jsonError('未通过身份校验'),
+    403: jsonError('账号已注销，不再接受反馈'),
     413: jsonError('请求体过大'),
     409: jsonError('消息 ID 已被使用，需换一个新 ID'),
     429: jsonError('发送过于频繁，details.rule 为 per_minute 或 per_day'),

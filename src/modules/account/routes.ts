@@ -22,7 +22,8 @@ const deleteAccountRoute = createRoute({
   summary: '注销账号',
   description:
     '物理删除当前用户在所有产品下的意见反馈对话、消息、设备信息与诊断；反馈单只保留不含用户与正文的匿名统计。' +
-    '没有数据或重复调用也返回 200。App 必须在删除 Logto 用户之前调用。',
+    '没有数据或重复调用也返回 200。App 必须在删除 Logto 用户之前调用。' +
+    '注销后 24 小时内，该用户再发反馈会返回 403。',
   middleware: [requireAuth] as const,
   security: [{ Bearer: [] }],
   responses: {

@@ -20,6 +20,8 @@ export const ErrorCode = {
   MessageIdConflict: 'MESSAGE_ID_CONFLICT',
   /** 只能把对话最新一条反馈单改回待处理 */
   TicketNotLatest: 'TICKET_NOT_LATEST',
+  /** 账号已注销，不再接受该用户的反馈写入 */
+  AccountDeleted: 'ACCOUNT_DELETED',
   Internal: 'INTERNAL_ERROR',
 } as const;
 
@@ -79,6 +81,9 @@ export const messageIdConflict = (): AppError =>
 /** 把旧反馈单改回待处理时返回 409 */
 export const ticketNotLatest = (): AppError =>
   new AppError(409, ErrorCode.TicketNotLatest, '只能把最新一条反馈单改回待处理');
+
+/** 账号已注销、墓碑有效期内再写反馈时返回 403 */
+export const accountDeleted = (): AppError => new AppError(403, ErrorCode.AccountDeleted, '账号已注销');
 
 /** 全局错误处理输出的标准 JSON 结构 */
 interface IErrorBody {

@@ -3,8 +3,11 @@
  *
  * 用户端函数都显式接收产品与 userId，查询一律按用户过滤；管理端函数按 ID 访问，权限由路由层把关。
  * 写消息、改状态都先锁住所属对话行，同一对话的写操作串行执行，保证「最多一单待处理」与消息去重成立。
- * 用户注销时整段删除该用户全部产品下的反馈。
+ * 用户注销时整段删除该用户全部产品下的反馈；发消息与注销先取同一用户的 advisory lock 串行执行，
+ * 注销同时写入墓碑，墓碑有效期内该用户再发消息会返回 403 ACCOUNT_DELETED。
  */
+import { createHash } from 'node:crypto';
+
 import { and, asc, desc, eq, gt, inArray, lt, max, sql } from 'drizzle-orm';
 
 import type { ProductCode } from '../../config/products.js';
@@ -12,6 +15,7 @@ import { db, type DbTransaction } from '../../db/index.js';
 import {
   feedbackAnonymizedTickets,
   feedbackConversations,
+  feedbackDeletedUsers,
   feedbackMessages,
   feedbackTickets,
   type FeedbackConversationRow,
@@ -22,8 +26,25 @@ import {
   type IFeedbackClientInfo,
   type IFeedbackDiagnostic,
 } from '../../db/schema.js';
-import { messageIdConflict, notFound, ticketNotLatest } from '../../shared/errors.js';
+import { accountDeleted, messageIdConflict, notFound, ticketNotLatest } from '../../shared/errors.js';
 import { deleteUserFeedback, type IUserFeedbackDeletionOps } from './account-deletion.js';
+
+/** 注销墓碑的保留时长（小时）：覆盖 App 删除 Logto 用户与 access token 过期前的窗口 */
+const DELETED_USER_TOMBSTONE_HOURS = 24;
+
+/** 用户 ID 的 sha256（小写十六进制），墓碑表只存它，不存原始 userId */
+function hashUserId(userId: string): string {
+  return createHash('sha256').update(userId).digest('hex');
+}
+
+/**
+ * 取该用户的事务级 advisory lock，把同一用户的发消息与注销串行起来；事务结束时自动释放。
+ *
+ * 只有这两条路径取这把锁，而且都在锁对话行之前取；管理员回复、改状态不取它，所以不会死锁。
+ */
+async function lockUserFeedback(tx: DbTransaction, userId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${'feedback_user:' + userId}, 0))`);
+}
 
 /** 一页数据与下一页游标 */
 export interface IPage<T> {
@@ -230,6 +251,16 @@ export async function sendUserMessage(
   message: INewMessage,
 ): Promise<FeedbackMessageRow> {
   return db.transaction(async (tx) => {
+    await lockUserFeedback(tx, userId);
+    // 注销墓碑有效期内拒绝写入，避免注销提交后又重建对话
+    const [tombstone] = await tx
+      .select({ userHash: feedbackDeletedUsers.userHash })
+      .from(feedbackDeletedUsers)
+      .where(and(eq(feedbackDeletedUsers.userHash, hashUserId(userId)), gt(feedbackDeletedUsers.expiresAt, sql`now()`)))
+      .limit(1);
+    if (tombstone !== undefined) {
+      throw accountDeleted();
+    }
     await tx
       .insert(feedbackConversations)
       .values({ product, userId })
@@ -419,10 +450,28 @@ export async function countPendingTickets(): Promise<number> {
  *
  * 对话按 id 排序后加锁，和发消息、管理员回复、改状态的「先锁对话行」串行，避免死锁。
  *
+ * 事务开头先取用户级 advisory lock 并写入注销墓碑（用户没有对话时也写），墓碑有效期内
+ * sendUserMessage 返回 403 ACCOUNT_DELETED，保证删除后不会有并发发消息重建数据。
+ *
  * @returns 删除的对话数；用户没有反馈数据时为 0
  */
 export async function deleteUserFeedbackData(userId: string): Promise<number> {
   return db.transaction(async (tx) => {
+    await lockUserFeedback(tx, userId);
+    // 墓碑必须在 deleteUserFeedback 之前写：用户没有对话时它会提前返回，这种情况也要拒绝后续写入
+    await tx
+      .insert(feedbackDeletedUsers)
+      .values({
+        userHash: hashUserId(userId),
+        expiresAt: sql`now() + make_interval(hours => ${DELETED_USER_TOMBSTONE_HOURS})`,
+      })
+      .onConflictDoUpdate({
+        target: feedbackDeletedUsers.userHash,
+        set: { expiresAt: sql`excluded.expires_at` },
+      });
+    // 顺手清掉过期墓碑
+    await tx.delete(feedbackDeletedUsers).where(lt(feedbackDeletedUsers.expiresAt, sql`now()`));
+
     const ops: IUserFeedbackDeletionOps = {
       lockUserConversations: (id) =>
         tx
