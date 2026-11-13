@@ -82,6 +82,30 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal(AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [{ ...item, canDelegate: true }] }).inbox[0]?.canDelegate, true);
   });
 
+  it('待办的 repos、branch：旧版 agentd 不传时按空数组和 null 处理，新版传了照收', () => {
+    const item = {
+      id: 'run-20261112-090000-abcd',
+      kind: 'run',
+      instanceId: 'implement-yado-code',
+      runId: '20261112-090000-abcd',
+      title: '新功能待你过一遍：待办卡片显示仓库和分支',
+      detail: '重点看：',
+      severity: null,
+      location: null,
+      runStatus: 'succeeded',
+      createdAt: '2026-11-12T09:00:00.000Z',
+    };
+    const legacy = AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [item] }).inbox[0];
+    assert.deepEqual(legacy?.repos, []);
+    assert.equal(legacy?.branch, null);
+    const current = AgentSyncRequestSchema.parse({
+      ...LEGACY_SYNC,
+      inbox: [{ ...item, repos: ['yado_agents', 'yado_hub'], branch: 'feat/inbox-repos' }],
+    }).inbox[0];
+    assert.deepEqual(current?.repos, ['yado_agents', 'yado_hub']);
+    assert.equal(current?.branch, 'feat/inbox-repos');
+  });
+
   it('运行的 topic、activity 和步骤的 label：旧版 agentd 不传时按 null 处理，新版传了照收', () => {
     const step = {
       key: 'r1.triage',

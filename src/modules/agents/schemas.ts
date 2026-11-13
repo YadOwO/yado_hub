@@ -200,6 +200,14 @@ export const AgentInboxItemSchema = z
     canDelegate: z.boolean().default(false).openapi({
       description: '能不能交给主审：问题和做完的新功能一直能；停下来的一次实现由 agentd 判断（已开始实现、代码还在、次数没用完）',
     }),
+    // 旧版 agentd 不传，按空处理：仓库和分支还写在 detail 正文里
+    repos: z.array(z.string()).max(50).default([]).openapi({
+      description: '做完的新功能改到并推上去的仓库名；别的待办为空数组',
+    }),
+    // 旧版 agentd 不传，按空处理
+    branch: z.string().nullable().default(null).openapi({
+      description: '做完的新功能推上去的 feat 分支；别的待办为 null',
+    }),
     createdAt: z.string(),
   })
   .openapi('AgentInboxItem');
