@@ -27,6 +27,7 @@ import {
   type IFeedbackDiagnostic,
 } from '../../db/schema.js';
 import { accountDeleted, messageIdConflict, notFound, ticketNotLatest } from '../../shared/errors.js';
+import { type IPage, toPage } from '../../shared/pagination.js';
 import { deleteUserFeedback, type IUserFeedbackDeletionOps } from './account-deletion.js';
 
 /** 注销墓碑的保留时长（小时）：覆盖 App 删除 Logto 用户与 access token 过期前的窗口 */
@@ -44,13 +45,6 @@ function hashUserId(userId: string): string {
  */
 async function lockUserFeedback(tx: DbTransaction, userId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${'feedback_user:' + userId}, 0))`);
-}
-
-/** 一页数据与下一页游标 */
-export interface IPage<T> {
-  items: T[];
-  /** 下一页的 before 游标；没有更多时为 null */
-  nextBefore: number | null;
 }
 
 /** 写入一条消息所需的内容 */
@@ -87,16 +81,6 @@ export interface IAdminConversation {
   conversation: FeedbackConversationRow;
   /** 全部反馈单，从旧到新 */
   tickets: FeedbackTicketRow[];
-}
-
-/**
- * 把多查一条的结果切成一页：查询时 limit + 1，多出来的那条说明还有下一页。
- */
-function toPage<T>(rows: T[], limit: number, cursorOf: (row: T) => number): IPage<T> {
-  const hasMore = rows.length > limit;
-  const items = hasMore ? rows.slice(0, limit) : rows;
-  const last = items.at(-1);
-  return { items, nextBefore: hasMore && last !== undefined ? cursorOf(last) : null };
 }
 
 /** 查找用户在某产品下的对话；还没发过消息时不存在 */

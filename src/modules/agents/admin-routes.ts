@@ -6,12 +6,13 @@
  */
 import { createRoute, type z } from '@hono/zod-openapi';
 
-import type { AgentCommandRow, AgentEventRow, AgentRunRow } from '../../db/schema.js';
+import type { AgentCommandRow, AgentEventRow, AgentMachineRow, AgentRunRow } from '../../db/schema.js';
 import { requireAdmin } from '../../middleware/admin.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { createApp, jsonError } from '../../shared/openapi.js';
 import {
   AgentCommandSchema,
+  type AgentEventSchema,
   AgentIdeaListSchema,
   AgentLessonListSchema,
   AgentOverviewSchema,
@@ -39,17 +40,14 @@ import {
 /** agent 管理端子应用 */
 const app = createApp();
 
+/** 指令的对外响应结构，由 AgentCommandSchema 推导 */
+type AgentCommandDTO = z.infer<typeof AgentCommandSchema>;
+
+/** 事件的对外响应结构，由 AgentEventSchema 推导 */
+type AgentEventDTO = z.infer<typeof AgentEventSchema>;
+
 /** 指令转成响应 */
-function toCommandDTO(row: AgentCommandRow): {
-  id: string;
-  machineId: string;
-  type: string;
-  payload: unknown;
-  status: AgentCommandRow['status'];
-  result: string | null;
-  createdAt: string;
-  finishedAt: string | null;
-} {
+function toCommandDTO(row: AgentCommandRow): AgentCommandDTO {
   return {
     id: row.id,
     machineId: row.machineId,
@@ -63,14 +61,7 @@ function toCommandDTO(row: AgentCommandRow): {
 }
 
 /** 事件转成响应 */
-function toEventDTO(row: AgentEventRow): {
-  id: number;
-  at: string;
-  instanceId: string | null;
-  runId: string | null;
-  type: string;
-  message: string;
-} {
+function toEventDTO(row: AgentEventRow): AgentEventDTO {
   return {
     id: row.localId,
     at: row.at.toISOString(),
@@ -95,6 +86,16 @@ function toRunListItem(row: AgentRunRow): z.infer<typeof AgentRunListItemSchema>
     findingCount: findings.length,
     escalatedCount: findings.filter((finding) => finding.verdict === 'escalate').length,
   };
+}
+
+/** 读出全部机器并解析各自的快照；快照解析不了时 state 为 null */
+async function loadMachineStates(): Promise<{ row: AgentMachineRow; state: ReturnType<typeof parseMachineState> }[]> {
+  return (await listMachines()).map((row) => ({ row, state: parseMachineState(row) }));
+}
+
+/** 给快照里的一组条目补上所属机器 ID；快照缺这一项时按空数组处理 */
+function withMachineId<T extends object>(machineId: string, items: readonly T[] | undefined): (T & { machineId: string })[] {
+  return (items ?? []).map((item) => ({ ...item, machineId }));
 }
 
 /** 总览的 OpenAPI 契约 */
@@ -228,10 +229,9 @@ const getCommandRoute = createRoute({
 
 app.openapi(overviewRoute, async (c) => {
   const { tz, date } = c.req.valid('query');
-  const machines = await listMachines();
+  const parsed = await loadMachineStates();
   const today = await summarizeDay(tz, date);
   const now = Date.now();
-  const parsed = machines.map((row) => ({ row, state: parseMachineState(row) }));
   return c.json(
     {
       machines: parsed.map(({ row, state }) => ({
@@ -245,10 +245,8 @@ app.openapi(overviewRoute, async (c) => {
         modelThinking: state?.modelThinking ?? [],
         flows: state?.flows ?? [],
       })),
-      instances: parsed.flatMap(({ row, state }) =>
-        (state?.instances ?? []).map((instance) => ({ ...instance, machineId: row.id })),
-      ),
-      inbox: parsed.flatMap(({ row, state }) => (state?.inbox ?? []).map((item) => ({ ...item, machineId: row.id }))),
+      instances: parsed.flatMap(({ row, state }) => withMachineId(row.id, state?.instances)),
+      inbox: parsed.flatMap(({ row, state }) => withMachineId(row.id, state?.inbox)),
       today,
     },
     200,
@@ -273,16 +271,14 @@ app.openapi(getRunRoute, async (c) => {
 });
 
 app.openapi(listLessonsRoute, async (c) => {
-  const parsed = (await listMachines()).map((row) => ({ row, state: parseMachineState(row) }));
+  const parsed = await loadMachineStates();
   return c.json(
     {
-      lessons: parsed.flatMap(({ row, state }) => (state?.lessons ?? []).map((lesson) => ({ ...lesson, machineId: row.id }))),
+      lessons: parsed.flatMap(({ row, state }) => withMachineId(row.id, state?.lessons)),
       limits: parsed.flatMap(({ row, state }) =>
         state === null || state.lessonLimits === null ? [] : [{ ...state.lessonLimits, machineId: row.id }],
       ),
-      preferences: parsed.flatMap(({ row, state }) =>
-        (state?.preferences ?? []).map((preference) => ({ ...preference, machineId: row.id })),
-      ),
+      preferences: parsed.flatMap(({ row, state }) => withMachineId(row.id, state?.preferences)),
       preferenceLimits: parsed.flatMap(({ row, state }) =>
         state === null || state.preferenceLimit === null ? [] : [{ machineId: row.id, limit: state.preferenceLimit }],
       ),
@@ -292,10 +288,10 @@ app.openapi(listLessonsRoute, async (c) => {
 });
 
 app.openapi(listIdeasRoute, async (c) => {
-  const parsed = (await listMachines()).map((row) => ({ row, state: parseMachineState(row) }));
+  const parsed = await loadMachineStates();
   return c.json(
     {
-      ideas: parsed.flatMap(({ row, state }) => (state?.ideas ?? []).map((idea) => ({ ...idea, machineId: row.id }))),
+      ideas: parsed.flatMap(({ row, state }) => withMachineId(row.id, state?.ideas)),
       limits: parsed.flatMap(({ row, state }) =>
         (state?.instances ?? []).flatMap((instance) =>
           instance.ideaLimit === null

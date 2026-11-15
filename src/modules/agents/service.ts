@@ -22,6 +22,7 @@ import {
   type AgentRunRow,
 } from '../../db/schema.js';
 import { badRequest, notFound } from '../../shared/errors.js';
+import { type IPage, toPage } from '../../shared/pagination.js';
 import { claimWithWait } from './claim.js';
 import {
   AgentMachineStateSchema,
@@ -45,12 +46,6 @@ const lastContactAt = new Map<string, number>();
 
 /** 指令多久没送到 Mac 就作废；送到后多久没回报结果就算失败 */
 const COMMAND_TTL_MS = 10 * 60_000;
-
-/** 一页数据与下一页游标 */
-export interface IPage<T> {
-  items: T[];
-  nextBefore: number | null;
-}
 
 /** 解析机器的快照；版本对不上时按空快照处理，不让一台机器的旧数据拖垮整个页面 */
 export function parseMachineState(row: AgentMachineRow): AgentMachineState | null {
@@ -406,10 +401,7 @@ export async function listRuns(filter: IRunFilter): Promise<IPage<AgentRunRow>> 
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(agentRuns.seq))
     .limit(filter.limit + 1);
-  const hasMore = rows.length > filter.limit;
-  const items = hasMore ? rows.slice(0, filter.limit) : rows;
-  const last = items.at(-1);
-  return { items, nextBefore: hasMore && last !== undefined ? last.seq : null };
+  return toPage(rows, filter.limit, (row) => row.seq);
 }
 
 /** 运行详情与时间线 */
