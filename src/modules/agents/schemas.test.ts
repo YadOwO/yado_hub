@@ -82,6 +82,25 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal(AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [{ ...item, canDelegate: true }] }).inbox[0]?.canDelegate, true);
   });
 
+  it('待办的 canRetry：旧版 agentd 不传时按 false 处理，新版传了照收；页面能发接着跑的指令', () => {
+    const item = {
+      id: 'run-20261115-193903-49f8',
+      kind: 'run',
+      instanceId: 'implement-yado-code',
+      runId: '20261115-193903-49f8',
+      title: '运行失败',
+      detail: '「主审写方案」失败：用满 60 分钟没做完，提醒收尾后又等了 10 分钟，仍没给出结果',
+      severity: null,
+      location: null,
+      runStatus: 'failed',
+      createdAt: '2026-11-15T20:56:34.000Z',
+    };
+    assert.equal(AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [item] }).inbox[0]?.canRetry, false);
+    assert.equal(AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, inbox: [{ ...item, canRetry: true }] }).inbox[0]?.canRetry, true);
+    const command = AgentCommandInputSchema.safeParse({ type: 'inbox.resolve', payload: { itemId: item.id, action: 'retry' } });
+    assert.equal(command.success, true);
+  });
+
   it('待办的 repos、branch：旧版 agentd 不传时按空数组和 null 处理，新版传了照收', () => {
     const item = {
       id: 'run-20261112-090000-abcd',

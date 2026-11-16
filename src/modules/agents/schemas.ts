@@ -200,6 +200,10 @@ export const AgentInboxItemSchema = z
     canDelegate: z.boolean().default(false).openapi({
       description: '能不能交给主审：问题和做完的新功能一直能；停下来的一次实现由 agentd 判断（已开始实现、代码还在、次数没用完）',
     }),
+    // 旧版 agentd 不传，按 false 处理：页面上不显示「接着跑」
+    canRetry: z.boolean().default(false).openapi({
+      description: '能不能接着跑：失败或被中断、代码还在的一次实现由 agentd 判断；同一次运行重新排队，做完的步骤跳过',
+    }),
     // 旧版 agentd 不传，按空处理：仓库和分支还写在 detail 正文里
     repos: z.array(z.string()).max(50).default([]).openapi({
       description: '做完的新功能改到并推上去的仓库名；别的待办为空数组',
@@ -598,7 +602,8 @@ export const AgentCommandInputSchema = z
           // revise：做完的新功能按备注修改，同一次实现在 Mac 上重新排队，改完推回同一个 feat 分支；备注必填由 Mac 校验
           // verify：做完的新功能派 agent 过一遍，Mac 上另开一次运行，验完结果回到这条待办；备注可选
           // approve / reject：同意或拒绝等你点头的运行（发布）；页面只能点头，不能改计划和命令
-          action: z.enum(['wontfix', 'done', 'delegate', 'revise', 'verify', 'approve', 'reject']),
+          // retry：失败或被中断的一次实现接着跑，同一次运行在 Mac 上重新排队，做完的步骤跳过；能不能接着跑由 Mac 校验
+          action: z.enum(['wontfix', 'done', 'delegate', 'revise', 'verify', 'approve', 'reject', 'retry']),
           // 交给主审、同意或拒绝时补充的信息；交给主审时会写进给主审看的材料
           note: z.string().max(1000).optional(),
         })
