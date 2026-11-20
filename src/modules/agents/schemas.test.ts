@@ -233,6 +233,16 @@ describe('agent 同步与指令的 schema', () => {
     assert.equal(update({ thinking: { 'claude/claude-opus-5-5[1m]': '' } }), false);
   });
 
+  it('全局暂停：旧版 agentd 不传时按没暂停算；页面能一键暂停、恢复', () => {
+    assert.equal(AgentSyncRequestSchema.parse(LEGACY_SYNC).settings.isPaused, false);
+    const paused = AgentSyncRequestSchema.parse({ ...LEGACY_SYNC, settings: { ...LEGACY_SYNC.settings, isPaused: true } });
+    assert.equal(paused.settings.isPaused, true);
+    const update = (payload: unknown): boolean => AgentCommandInputSchema.safeParse({ type: 'settings.update', payload }).success;
+    assert.equal(update({ isPaused: true }), true);
+    assert.equal(update({ isPaused: false }), true);
+    assert.equal(update({ isPaused: 'yes' }), false);
+  });
+
   it('页面改实例的指令不再接受 isDryRun', () => {
     const result = AgentCommandInputSchema.safeParse({
       type: 'instance.update',

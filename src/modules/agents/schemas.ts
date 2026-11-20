@@ -225,6 +225,8 @@ export const AgentSettingsSchema = z
     thinking: z.record(z.string(), z.string()).default({}),
     retentionDays: z.number().int(),
     pausedFlows: z.array(z.string()),
+    // 全局暂停：不开新运行，定时到点跳过，正在跑的放回队列；旧版 agentd 不传，按没暂停算
+    isPaused: z.boolean().default(false).openapi({ description: '全局暂停中；旧版 agentd 不传时为 false' }),
   })
   .openapi('AgentSettings');
 
@@ -589,6 +591,8 @@ export const AgentCommandInputSchema = z
             .refine((value) => Object.keys(value).length <= 50, { message: '一次最多改 50 个模型' }),
           retentionDays: z.number().int().min(1).max(90),
           pausedFlows: z.array(z.string()),
+          // 一键暂停 / 恢复；旧版 agentd 不认这个字段，指令会失败，不会误改别的设置
+          isPaused: z.boolean(),
         })
         .partial()
         .strict(),
