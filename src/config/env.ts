@@ -8,6 +8,14 @@ import { z } from 'zod';
 
 loadDotenv({ quiet: true });
 
+/** 把逗号分隔的配置拆成列表，去掉每项首尾空白并丢弃空项 */
+function splitCommaSeparated(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 /** 启动时校验配置并补齐默认值 */
 const envSchema = z.object({
   /** HTTP 监听端口，与本地开发及部署端口配置保持一致 */
@@ -50,11 +58,9 @@ const envSchema = z.object({
     .default('')
     .refine(
       (value) =>
-        value
-          .split(',')
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0)
-          .every((item) => /^[a-z0-9][a-z0-9-]{0,39}:[0-9a-f]{64}$/.test(item)),
+        splitCommaSeparated(value).every((item) =>
+          /^[a-z0-9][a-z0-9-]{0,39}:[0-9a-f]{64}$/.test(item),
+        ),
       { message: '格式应为 机器ID:sha256（64 位小写十六进制），多台用逗号分隔' },
     ),
 });
@@ -87,20 +93,13 @@ export const env = {
    */
   isDevAuthBypassEnabled: raw.AUTH_DEV_BYPASS === 'true' && !isProduction,
   /** 管理员用户 ID 集合；未配置时为空，任何人都不是管理员 */
-  adminUserIds: new Set(
-    raw.ADMIN_USER_IDS.split(',')
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0),
-  ),
+  adminUserIds: new Set(splitCommaSeparated(raw.ADMIN_USER_IDS)),
   /** 凭证哈希 → 机器 ID；未配置时为空，任何机器都不能同步 */
   agentMachineTokens: new Map(
-    raw.AGENT_MACHINE_TOKENS.split(',')
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0)
-      .map((item) => {
-        const [machineId = '', hash = ''] = item.split(':');
-        return [hash, machineId] as const;
-      }),
+    splitCommaSeparated(raw.AGENT_MACHINE_TOKENS).map((item) => {
+      const [machineId = '', hash = ''] = item.split(':');
+      return [hash, machineId] as const;
+    }),
   ),
 } as const;
 

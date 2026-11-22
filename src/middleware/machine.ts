@@ -9,6 +9,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createMiddleware } from 'hono/factory';
 
 import { env } from '../config/env.js';
+import { parseBearerToken } from '../shared/bearer.js';
 import { unauthorized } from '../shared/errors.js';
 import type { AppEnv } from '../types.js';
 
@@ -27,11 +28,11 @@ function findMachine(token: string): string | null {
  * 要求请求带有效的机器凭证，并把机器 ID 写入 context。
  */
 export const requireMachine = createMiddleware<AppEnv>(async (c, next) => {
-  const header = c.req.header('Authorization');
-  if (header === undefined || !header.toLowerCase().startsWith('bearer ')) {
+  const token = parseBearerToken(c.req.header('Authorization'));
+  if (token === null) {
     throw unauthorized('缺少机器凭证');
   }
-  const machineId = findMachine(header.slice('bearer '.length).trim());
+  const machineId = findMachine(token);
   if (machineId === null) {
     throw unauthorized('机器凭证不对');
   }
