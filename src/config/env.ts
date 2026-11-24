@@ -6,6 +6,8 @@
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 
+import { parseAccountDeletionServices } from './account-deletion.js';
+
 loadDotenv({ quiet: true });
 
 /** 把逗号分隔的配置拆成列表，去掉每项首尾空白并丢弃空项 */
@@ -15,6 +17,15 @@ function splitCommaSeparated(value: string): string[] {
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
 }
+
+/**
+ * 可选的非空字符串。.env 里写成 `KEY=` 会得到空字符串，这里把空字符串（含只有空白）视为未配置，
+ * 避免留空的可选配置让服务启动失败。
+ */
+const optionalNonEmptyString = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
 
 /** 启动时校验配置并补齐默认值 */
 const envSchema = z.object({
@@ -63,10 +74,39 @@ const envSchema = z.object({
         ),
       { message: '格式应为 机器ID:sha256（64 位小写十六进制），多台用逗号分隔' },
     ),
+
+  /**
+   * Logto Machine-to-Machine 应用 ID：注销账号的最后一步用它调 Management API 删除 Logto 用户。
+   * 留空时真实用户注销返回 503，开发态免鉴权的假用户不受影响。
+   */
+  LOGTO_M2M_APP_ID: optionalNonEmptyString,
+  /** Logto Machine-to-Machine 应用密钥，与 LOGTO_M2M_APP_ID 成对配置 */
+  LOGTO_M2M_APP_SECRET: optionalNonEmptyString,
+  /** Logto Management API 的 resource indicator；留空时用 Logto 内置值 */
+  LOGTO_MANAGEMENT_RESOURCE: optionalNonEmptyString,
+
+  /**
+   * 注销账号时按顺序调用的下游服务：`服务名=容器内网地址`，逗号分隔，
+   * 例如 `yado-ai=http://yado-ai:7790,yadoa-be=http://yadoa-be:7789,yadoi-be=http://yadoi-be:7788`。
+   * 留空时真实用户注销返回 503；格式错误或与 ACCOUNT_DELETION_TOKENS 对不上时启动失败。
+   */
+  ACCOUNT_DELETION_SERVICES: z.string().default(''),
+  /**
+   * 发给每个下游服务的机器凭证：`服务名:凭证`，逗号分隔，每个服务一个且互不相同。
+   * 对方的 INTERNAL_MACHINE_TOKENS 里存 `yado-hub:<凭证的 sha256>`。
+   */
+  ACCOUNT_DELETION_TOKENS: z.string().default(''),
 });
 
 /** 只对通过校验的环境变量继续初始化，避免错误配置进入运行阶段 */
-const parsed = envSchema.safeParse(process.env);
+const parsed = envSchema
+  .superRefine((value, context) => {
+    const result = parseAccountDeletionServices(value.ACCOUNT_DELETION_SERVICES, value.ACCOUNT_DELETION_TOKENS);
+    if (!result.ok) {
+      context.addIssue({ code: 'custom', path: ['ACCOUNT_DELETION_SERVICES'], message: result.message });
+    }
+  })
+  .safeParse(process.env);
 
 if (!parsed.success) {
   const details = parsed.error.issues
@@ -80,13 +120,38 @@ if (!parsed.success) {
 const raw = parsed.data;
 /** 生产环境标识，作为开发态免鉴权的强制关闭条件 */
 const isProduction = raw.NODE_ENV === 'production';
+/** 去掉末尾 `/` 的 Logto issuer，JWKS、token 与 Management API 地址都以它为基础拼接 */
+const logtoIssuerBase = raw.LOGTO_ISSUER.replace(/\/$/, '');
 
-/** 供全服务使用的已校验配置及派生选项；包含连接串，不可整体写入日志 */
+/** 已在 superRefine 里校验过，这里解析必然成功；保险起见失败时按未配置处理 */
+const accountDeletionServicesResult = parseAccountDeletionServices(
+  raw.ACCOUNT_DELETION_SERVICES,
+  raw.ACCOUNT_DELETION_TOKENS,
+);
+
+/** 供全服务使用的已校验配置及派生选项；包含连接串与密钥，不可整体写入日志 */
 export const env = {
   ...raw,
   isProduction,
   /** JWKS 实际地址 */
-  logtoJwksUrl: raw.LOGTO_JWKS_URL ?? `${raw.LOGTO_ISSUER.replace(/\/$/, '')}/jwks`,
+  logtoJwksUrl: raw.LOGTO_JWKS_URL ?? `${logtoIssuerBase}/jwks`,
+  /**
+   * Logto Management API 配置：两个 M2M 凭证都配置时才可用，否则为 null。
+   * tokenUrl 用于换取 M2M access token；apiBaseUrl 是 Management API 根地址，
+   * 位于 Logto 域名根下的 /api（issuer 去掉末尾的 /oidc）。
+   */
+  logtoManagement:
+    raw.LOGTO_M2M_APP_ID !== undefined && raw.LOGTO_M2M_APP_SECRET !== undefined
+      ? {
+          tokenUrl: `${logtoIssuerBase}/token`,
+          apiBaseUrl: `${logtoIssuerBase.replace(/\/oidc$/, '')}/api`,
+          resource: raw.LOGTO_MANAGEMENT_RESOURCE ?? 'https://default.logto.app/api',
+          appId: raw.LOGTO_M2M_APP_ID,
+          appSecret: raw.LOGTO_M2M_APP_SECRET,
+        }
+      : null,
+  /** 注销账号时按顺序调用的下游服务；未配置时为空 */
+  accountDeletionServices: accountDeletionServicesResult.ok ? accountDeletionServicesResult.services : [],
   /**
    * 是否启用开发态免鉴权。
    * 生产环境无论如何配置都为 false，防止误开导致接口裸奔。
@@ -105,4 +170,8 @@ export const env = {
 
 if (raw.AUTH_DEV_BYPASS === 'true' && isProduction) {
   console.warn('检测到 AUTH_DEV_BYPASS=true，但当前为生产环境，已强制忽略该配置。');
+}
+
+if ((raw.LOGTO_M2M_APP_ID === undefined) !== (raw.LOGTO_M2M_APP_SECRET === undefined)) {
+  console.warn('LOGTO_M2M_APP_ID 与 LOGTO_M2M_APP_SECRET 只配了一个，按未配置处理：真实用户注销会返回 503。');
 }

@@ -6,6 +6,7 @@ OpenAPI 契约。
 
 - 当前功能：
   - 意见反馈，设计见 [意见反馈设计](./docs/feedback-design.md)。
+  - 注销账号：所有芽豆 App 共用一个 Logto 账号，注销统一由 hub 编排，删完各服务的数据后再删 Logto 用户，见下文「注销账号」。
   - Agent 管理：Mac 上的 agentd（[yado_agents](../yado_agents)）每分钟来问一次有没有指令，有变化或每小时把状态摘要同步上来，管理端看运行结果、
     改实例与设置都经这里转成指令交给 agentd 执行。hub 不跑流程，只存摘要（不存代码、diff、模型原始输出）。
 - 数据放在 `yado` 库的 `yado_hub` schema；用户只以 Logto 用户 ID 标识，不存昵称、邮箱等资料。
@@ -21,15 +22,20 @@ src/
 ├── app.ts                      组装路由、健康检查、OpenAPI 文档
 ├── config/env.ts               环境变量校验
 ├── config/products.ts          已接入的产品代号
+├── config/account-deletion.ts  注销时要调用的下游服务列表与凭证的解析
 ├── db/                         Drizzle 表定义（yado_hub schema）与连接池
 ├── middleware/
-│   ├── auth.ts                 Logto JWT 校验
+│   ├── auth.ts                 Logto JWT 校验，拒绝注销名单里的用户
 │   ├── admin.ts                管理员校验（ADMIN_USER_IDS）
 │   ├── machine.ts              agentd 的机器凭证校验（AGENT_MACHINE_TOKENS）
 │   └── rate-limit.ts           按用户限流
-├── shared/                     统一错误、OpenAPIHono 工厂
+├── shared/                     统一错误、OpenAPIHono 工厂、注销名单读写、Logto Management API 客户端
 └── modules/
     ├── admin/index.ts          管理端汇总：GET /v1/admin/status，挂载各功能管理端
+    ├── account/                注销账号 DELETE /v1/account
+    │   ├── deletion.ts         编排：注销名单 → 意见反馈 → 各下游服务 → Logto（不依赖数据库，可单独测试）
+    │   ├── service.ts          把编排接上配置、数据库与 Logto
+    │   └── routes.ts           路由
     └── feedback/               意见反馈
         ├── schemas.ts          请求与响应契约
         ├── service.ts          对话、反馈单、消息的读写与规则
@@ -67,6 +73,7 @@ pnpm run dev
 | POST | `/v1/feedback/{product}/messages` | 发消息，同一 `id` 重发幂等 |
 | POST | `/v1/feedback/{product}/read` | 标记已读到 `seq` |
 | GET | `/v1/feedback/{product}/unread` | 未读条数 |
+| DELETE | `/v1/account` | 注销账号：删除各服务的数据和 Logto 用户，可重复调用，见下文「注销账号」 |
 
 管理端（`ADMIN_USER_IDS` 中的账号）：
 
@@ -95,12 +102,53 @@ agentd 用（机器凭证，不是 Logto 登录）：
 | 状态码 | code | 含义 |
 | --- | --- | --- |
 | 400 | `BAD_REQUEST` | 参数校验失败 |
-| 401 | `UNAUTHORIZED` | token 缺失或无效 |
+| 401 | `UNAUTHORIZED` | token 缺失或无效，或账号已注销（注销名单里的用户） |
 | 403 | `FORBIDDEN` | 不是管理员 |
+| 403 | `ACCOUNT_DELETED` | 发消息与注销同时发生、注销先完成 |
 | 404 | `NOT_FOUND` | 对话或反馈单不存在 |
 | 409 | `MESSAGE_ID_CONFLICT` | 消息 ID 已被其他对话使用，换新 ID 重发 |
 | 409 | `TICKET_NOT_LATEST` | 只能把最新一条反馈单改回待处理 |
 | 429 | `TOO_MANY_REQUESTS` | 发消息超过限流，`details.rule` 为 `per_minute` 或 `per_day` |
+| 502 | `ACCOUNT_DELETION_FAILED` | 注销的某一步失败，`details.step` 是下游服务名或 `logto`；App 直接重试 |
+| 503 | `SERVICE_NOT_CONFIGURED` | 注销所需的配置缺失（Logto M2M 凭证或下游服务列表），什么都没动 |
+
+## 注销账号
+
+所有芽豆 App 共用一个 Logto 账号，各 App 注销只调 hub 的 `DELETE /v1/account`。hub 按顺序做：
+
+1. 把用户写进注销名单 `yado_hub.deleted_users`（永久保留）。之后这个用户的旧 token 访问 hub 的其他接口一律 401；
+   注销接口本身用 `requireAuthIncludingDeleted`，所以中途失败后可以用同一个 token 重试。
+2. 删除 hub 自己的意见反馈（反馈单只留不含用户与正文的匿名统计）。
+3. 按 `ACCOUNT_DELETION_SERVICES` 的顺序调各下游服务的内部接口 `DELETE {地址}/internal/v1/users/{userId}`，
+   每个服务用 `ACCOUNT_DELETION_TOKENS` 里各自的机器凭证。下游各自删数据、写自己的注销名单，可重复调用。
+4. 全部成功后，用 Logto Management API 删除 Logto 用户（404 算成功）。Logto 用户最后删：删了 App 就拿不到新 token，没法再重试。
+5. 记下 `completed_at`。
+
+任何一步失败（非 2xx、超时、网络错误）立即停下，返回 502 `ACCOUNT_DELETION_FAILED`，前面的步骤不回滚，App 重试时从头再走一遍。
+`deleted_users` 里 `completed_at` 为空的行就是中途失败、用户还没重试成功的注销，可以据此排查：
+
+```sql
+SELECT user_id, deleted_at FROM yado_hub.deleted_users WHERE completed_at IS NULL ORDER BY deleted_at;
+```
+
+每个下游 10 秒超时，Logto 换 token、删用户各 10 秒，最坏约 50 秒，低于 nginx 默认的 60 秒；加下游服务时要一起核对。
+
+配置（见 `.env.example`）：
+
+- `ACCOUNT_DELETION_SERVICES`：`服务名=容器内网地址`，逗号分隔，按调用顺序。线上与 dev 都是
+  `yado-ai=http://yado-ai:7790,yadoa-be=http://yadoa-be:7789,yadoi-be=http://yadoi-be:7788`（compose 服务名，走容器内网，不经 nginx）。
+- `ACCOUNT_DELETION_TOKENS`：`服务名:凭证`，每个服务一个、互不相同。生成与配对：
+  ```bash
+  TOKEN=$(openssl rand -hex 32)                        # 填进 hub 的 ACCOUNT_DELETION_TOKENS，例如 yado-ai:$TOKEN
+  printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1   # 填进对方的 INTERNAL_MACHINE_TOKENS=yado-hub:<这串>
+  ```
+- `LOGTO_M2M_APP_ID`、`LOGTO_M2M_APP_SECRET`：Logto 机器对机器应用，分配带 Logto Management API「all」权限的角色。
+- 真实用户缺 Logto 凭证或一个下游都没配时返回 503，什么都不动；格式错误或服务与凭证对不上时服务启动失败。
+- 开发态免鉴权（`AUTH_DEV_BYPASS=true`）的假用户不删 Logto 用户，下游配了几个调几个。调过一次注销后，`AUTH_DEV_USER_ID`
+  就在注销名单里，本地其他接口都会 401；要恢复执行 `DELETE FROM yado_hub.deleted_users WHERE user_id = '<AUTH_DEV_USER_ID>';`，或换一个用户 ID。
+
+新的产品后端接入：在它那边实现 `DELETE /internal/v1/users/{userId}`（机器凭证鉴权、可重复调用，照 yadoA_be 的 `modules/internal`），
+生成一对凭证，在 hub 的两个变量里各加一项，重启 hub。
 
 ## 常用脚本
 
@@ -205,7 +253,7 @@ agentd 用（机器凭证，不是 Logto 登录）：
 ## 已知限制
 
 - 限流计数在进程内存中，重启清零；只适用于单实例部署，扩成多实例时需改用 Redis。
-- 管理员名单、agent 机器凭证在环境变量中，修改后需重启容器。
+- 管理员名单、agent 机器凭证、注销要调的下游服务与凭证在环境变量中，修改后需重启容器。
 - 页面发给 Mac 的指令要等它下次来问（每分钟一次）才执行；Mac 离线时指令 10 分钟后作废。
 - 页面上的实例、待办是 Mac 最近一次上传时的状态：Mac 有新事件时一分钟内上传，否则一小时一次；页面上的「立即同步」让它马上传。
 - 「是否在线」看 Mac 最近一次来问的时间，只记在内存里；hub 重启后最多一分钟显示离线。

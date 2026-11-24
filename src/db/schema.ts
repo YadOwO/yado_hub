@@ -177,14 +177,34 @@ export const feedbackAnonymizedTickets = yadoHubSchema.table(
 );
 
 /**
- * 注销墓碑：用户注销账号时写入，在过期前拒绝该用户再写反馈，防止注销与并发发消息交错后残留数据。
+ * 注销名单：已注销账号的 Logto 用户 ID，永久保留。
  *
- * 只存 userId 的 sha256 和过期时间，不存原始 userId 和其他资料；过期行在下次注销时顺带清理。
+ * 用户在任一芽豆 App 注销时，hub 编排注销的第一步就写入这里（见 modules/account），之后：
+ * - requireAuth 拒绝该用户仍然有效的 access token（JWT 离线验签，Logto 删用户后旧 token 仍能过验签）；
+ * - 发反馈消息在事务里再查一次，和注销串行，避免注销途中又写进新数据。
+ *
+ * 和 yado_ai、yadoA_be、yadoI_be 的 deleted_users 一样只存用户 ID 与时间，不存任何用户资料；
+ * 多一列 completed_at 记录整套注销是否走完，completed_at 为空的行就是中途失败、等用户重试的注销。
+ */
+export const deletedUsers = yadoHubSchema.table('deleted_users', {
+  /** 已注销用户，取 Logto JWT 的 sub */
+  userId: text('user_id').primaryKey(),
+  /** 第一次发起注销的时刻；重试不改 */
+  deletedAt: timestamp('deleted_at', { withTimezone: true }).notNull().defaultNow(),
+  /** 各服务的数据都删完、Logto 用户也已删除的时刻；中途失败时为空 */
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
+
+/**
+ * 已停用：以前的 24 小时注销墓碑（只存 userId 的 sha256 和过期时间），已由上面的永久注销名单 deleted_users 取代，代码不再读写。
+ *
+ * 暂时保留表定义，是因为迁移在新镜像上线前手工执行，期间旧镜像还在读写这张表，同一次迁移删掉它会让旧镜像发反馈出错。
+ * TODO: 带 deleted_users 的版本上线后，删掉这个定义并 db:generate 出 DROP TABLE 迁移。
  */
 export const feedbackDeletedUsers = yadoHubSchema.table('feedback_deleted_users', {
   /** userId 的 sha256，64 位小写十六进制 */
   userHash: text('user_hash').primaryKey(),
-  /** 墓碑过期时间，过期后该用户（若 Logto 账号仍在）可以再发反馈 */
+  /** 墓碑过期时间 */
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
@@ -203,8 +223,8 @@ export type FeedbackAnonymizedTicketRow = typeof feedbackAnonymizedTickets.$infe
 /** 新增匿名反馈单统计行所需的字段 */
 export type NewFeedbackAnonymizedTicket = typeof feedbackAnonymizedTickets.$inferInsert;
 
-/** 注销墓碑行 */
-export type FeedbackDeletedUserRow = typeof feedbackDeletedUsers.$inferSelect;
+/** 注销名单行 */
+export type DeletedUserRow = typeof deletedUsers.$inferSelect;
 
 /**
  * 指令状态：pending 等 Mac 取走，sent 已送到 Mac 等结果，succeeded / failed 已执行，

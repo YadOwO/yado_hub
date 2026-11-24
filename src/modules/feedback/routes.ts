@@ -53,7 +53,8 @@ const sendMessageRoute = createRoute({
   summary: '发送反馈消息',
   description:
     '第一次发送时创建对话。同一 id 重发时返回已有消息，不重复写入。' +
-    '消息归入对话最新一条待处理的反馈单，没有时新开一条。注销账号后一段时间内返回 403 ACCOUNT_DELETED。',
+    '消息归入对话最新一条待处理的反馈单，没有时新开一条。' +
+    '注销账号后的请求返回 401；发消息与注销同时发生、注销先完成时返回 403 ACCOUNT_DELETED。',
   middleware: [
     requireAuth,
     feedbackMessageRateLimit,

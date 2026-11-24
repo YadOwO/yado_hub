@@ -68,7 +68,7 @@ app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
 
 // 鉴权挂在各路由的 middleware 字段上，不在此处用 app.use。
 app.route('/v1/feedback', feedbackRoutes);
-// 注销账号，删除当前用户在各功能的数据
+// 注销账号：hub 统一编排，删完 hub 与各下游服务的数据后删除 Logto 用户
 app.route('/v1/account', accountRoutes);
 // agent 同步接口用机器凭证鉴权，只给 Mac 上的 agentd 用；管理端在 /v1/admin/agents
 app.route('/v1/agents', agentRoutes);

@@ -22,6 +22,10 @@ export const ErrorCode = {
   TicketNotLatest: 'TICKET_NOT_LATEST',
   /** 账号已注销，不再接受该用户的反馈写入 */
   AccountDeleted: 'ACCOUNT_DELETED',
+  /** 注销账号的某一步（下游服务删除数据或删除 Logto 用户）失败，可重试；details.step 标明是哪一步 */
+  AccountDeletionFailed: 'ACCOUNT_DELETION_FAILED',
+  /** 服务端缺少必要配置，功能暂不可用 */
+  ServiceNotConfigured: 'SERVICE_NOT_CONFIGURED',
   Internal: 'INTERNAL_ERROR',
 } as const;
 
@@ -29,7 +33,7 @@ export const ErrorCode = {
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 /** 可安全返回给客户端的错误状态码 */
-export type AppErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 503;
+export type AppErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 500 | 502 | 503;
 
 /**
  * 业务异常。抛出后由全局 onError 统一转换为标准错误响应。
@@ -82,8 +86,23 @@ export const messageIdConflict = (): AppError =>
 export const ticketNotLatest = (): AppError =>
   new AppError(409, ErrorCode.TicketNotLatest, '只能把最新一条反馈单改回待处理');
 
-/** 账号已注销、墓碑有效期内再写反馈时返回 403 */
+/**
+ * 已通过鉴权的发消息请求在事务里发现用户已进注销名单时返回 403（注销与发消息同时发生）；
+ * 注销之后的新请求在鉴权时就返回 401，到不了这里。
+ */
 export const accountDeleted = (): AppError => new AppError(403, ErrorCode.AccountDeleted, '账号已注销');
+
+/**
+ * 注销账号的某一步失败时返回 502，App 应提示用户重试；已完成的步骤可以重复执行。
+ *
+ * @param step 失败的那一步：下游服务名（如 yado-ai）或 logto；不含地址、凭证等内部细节
+ */
+export const accountDeletionFailed = (step: string): AppError =>
+  new AppError(502, ErrorCode.AccountDeletionFailed, '注销没有完成，请稍后重试', { step });
+
+/** 注销账号所需的配置（Logto M2M 凭证或下游服务列表）缺失时返回 503 */
+export const serviceNotConfigured = (): AppError =>
+  new AppError(503, ErrorCode.ServiceNotConfigured, '注销服务尚未配置');
 
 /** 全局错误处理输出的标准 JSON 结构 */
 interface IErrorBody {
