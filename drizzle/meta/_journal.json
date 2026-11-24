@@ -43,6 +43,13 @@
       "when": 1795434995174,
       "tag": "0005_account_deletion_hub",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795513546244,
+      "tag": "0006_data_links",
+      "breakpoints": true
     }
   ]
 }

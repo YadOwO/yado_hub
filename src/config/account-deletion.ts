@@ -22,8 +22,8 @@ const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** 机器凭证的格式：至少 32 位，只含 base64 / 十六进制会用到的字符，不能有逗号、冒号与空白 */
 const TOKEN_PATTERN = /^[A-Za-z0-9+/=_-]{32,}$/;
 
-/** 把逗号分隔的配置拆成列表，去掉每项首尾空白并丢弃空项 */
-function splitItems(value: string): string[] {
+/** 把逗号分隔的配置拆成列表，去掉每项首尾空白并丢弃空项；config/data-links.ts 也用它 */
+export function splitItems(value: string): string[] {
   return value
     .split(',')
     .map((item) => item.trim())

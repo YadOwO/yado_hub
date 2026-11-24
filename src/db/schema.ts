@@ -10,7 +10,18 @@
  * - 本文件供 drizzle-kit 单独加载，不引用业务代码。
  */
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, jsonb, pgSchema, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  check,
+  index,
+  jsonb,
+  pgSchema,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 /** 本服务独占的 Postgres schema 名 */
 export const DB_SCHEMA_NAME = 'yado_hub';
@@ -196,6 +207,34 @@ export const deletedUsers = yadoHubSchema.table('deleted_users', {
 });
 
 /**
+ * 数据联动授权：用户同意「把 source 产品里的某类汇总数提供给 target 产品」的记录，目前只有
+ * 芽豆有物（yadoi）→ 芽豆资产（yadoa）的物品估值汇总（scope = item_value_summary）。
+ *
+ * 只存授权关系，不存任何汇总数据；汇总数在用户打开芽豆资产时由 hub 用机器凭证向来源产品后端现取。
+ * 取消授权只记 revoked_at、不删行，同一主键再次授权时清掉 revoked_at 并重置 granted_at；
+ * 用户注销时物理删除这个用户的全部行（见 modules/account）。
+ * source、target、scope 以后会增加，合法值由 Zod 把关，不加 check 约束。
+ */
+export const dataLinks = yadoHubSchema.table(
+  'data_links',
+  {
+    /** 授权的用户，取 Logto JWT 的 sub */
+    userId: text('user_id').notNull(),
+    /** 数据来源的产品代号，例如 yadoi；合法值见 config/data-links.ts */
+    source: text('source').notNull(),
+    /** 数据使用方的产品代号，例如 yadoa */
+    target: text('target').notNull(),
+    /** 授权的数据范围，例如 item_value_summary（物品购入价汇总） */
+    scope: text('scope').notNull(),
+    /** 最近一次授权生效的时刻：重复授权不改，撤销后再授权时更新为当时 */
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+    /** 取消授权的时刻；为空表示授权有效 */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.source, table.target, table.scope] })],
+);
+
+/**
  * 已停用：以前的 24 小时注销墓碑（只存 userId 的 sha256 和过期时间），已由上面的永久注销名单 deleted_users 取代，代码不再读写。
  *
  * 暂时保留表定义，是因为迁移在新镜像上线前手工执行，期间旧镜像还在读写这张表，同一次迁移删掉它会让旧镜像发反馈出错。
@@ -225,6 +264,9 @@ export type NewFeedbackAnonymizedTicket = typeof feedbackAnonymizedTickets.$infe
 
 /** 注销名单行 */
 export type DeletedUserRow = typeof deletedUsers.$inferSelect;
+
+/** 数据联动授权行 */
+export type DataLinkRow = typeof dataLinks.$inferSelect;
 
 /**
  * 指令状态：pending 等 Mac 取走，sent 已送到 Mac 等结果，succeeded / failed 已执行，

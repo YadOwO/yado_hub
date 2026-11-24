@@ -60,6 +60,7 @@ modules/<功能>/service.ts        数据读写与业务规则
 modules/<功能>/routes.ts         用户端路由，挂在 /v1/<功能> 下，产品代号作为路径参数 {product}
 modules/<功能>/admin-routes.ts   管理端路由，由 modules/admin 挂到 /v1/admin/<功能>
 modules/admin/index.ts          管理端汇总与管理入口状态，可以引用各功能的 service
+modules/links/                  数据联动 /v1/links：用户授权记录（data_links），授权后用 ACCOUNT_DELETION_* 里对应服务的机器凭证调来源后端的内部汇总接口；路径用 {source}/{target}，不按 {product}
 modules/account/                注销账号 DELETE /v1/account：各 App 注销只调这里，hub 编排「注销名单 → 各功能数据 → 各下游服务的
                                 内部删除接口 → 删 Logto 用户」（deletion.ts），可以引用各功能的 service
 config/products.ts              已接入的产品代号

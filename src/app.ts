@@ -14,6 +14,7 @@ import accountRoutes from './modules/account/routes.js';
 import adminRoutes from './modules/admin/index.js';
 import agentRoutes from './modules/agents/routes.js';
 import feedbackRoutes from './modules/feedback/routes.js';
+import linksRoutes from './modules/links/routes.js';
 import { handleError } from './shared/errors.js';
 import { createApp } from './shared/openapi.js';
 
@@ -68,6 +69,8 @@ app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
 
 // 鉴权挂在各路由的 middleware 字段上，不在此处用 app.use。
 app.route('/v1/feedback', feedbackRoutes);
+// 数据联动：用户授权后，hub 用机器凭证向来源产品后端要汇总数
+app.route('/v1/links', linksRoutes);
 // 注销账号：hub 统一编排，删完 hub 与各下游服务的数据后删除 Logto 用户
 app.route('/v1/account', accountRoutes);
 // agent 同步接口用机器凭证鉴权，只给 Mac 上的 agentd 用；管理端在 /v1/admin/agents

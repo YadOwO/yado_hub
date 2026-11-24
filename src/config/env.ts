@@ -6,7 +6,8 @@
 import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 
-import { parseAccountDeletionServices } from './account-deletion.js';
+import { parseAccountDeletionServices, type IDownstreamService } from './account-deletion.js';
+import { parseDataLinkSources, type DataLinkSource } from './data-links.js';
 
 loadDotenv({ quiet: true });
 
@@ -96,6 +97,13 @@ const envSchema = z.object({
    * 对方的 INTERNAL_MACHINE_TOKENS 里存 `yado-hub:<凭证的 sha256>`。
    */
   ACCOUNT_DELETION_TOKENS: z.string().default(''),
+
+  /**
+   * 打开的数据联动来源，逗号分隔，目前只认 yadoi（芽豆有物的物品估值汇总）。
+   * 来源后端的地址与机器凭证复用 ACCOUNT_DELETION_SERVICES / ACCOUNT_DELETION_TOKENS 里对应的服务（yadoi → yadoi-be）；
+   * 留空表示不开任何联动。写了不认识的来源、重复的来源，或找不到对应服务时启动失败。
+   */
+  DATA_LINK_SOURCES: z.string().default(''),
 });
 
 /** 只对通过校验的环境变量继续初始化，避免错误配置进入运行阶段 */
@@ -104,6 +112,12 @@ const parsed = envSchema
     const result = parseAccountDeletionServices(value.ACCOUNT_DELETION_SERVICES, value.ACCOUNT_DELETION_TOKENS);
     if (!result.ok) {
       context.addIssue({ code: 'custom', path: ['ACCOUNT_DELETION_SERVICES'], message: result.message });
+      return;
+    }
+    // 联动来源要用到下游服务的地址与凭证，所以必须在服务列表解析成功之后再校验
+    const dataLinkResult = parseDataLinkSources(value.DATA_LINK_SOURCES, result.services);
+    if (!dataLinkResult.ok) {
+      context.addIssue({ code: 'custom', path: ['DATA_LINK_SOURCES'], message: dataLinkResult.message });
     }
   })
   .safeParse(process.env);
@@ -129,6 +143,16 @@ const accountDeletionServicesResult = parseAccountDeletionServices(
   raw.ACCOUNT_DELETION_TOKENS,
 );
 
+/** 同样已在 superRefine 里校验过；服务列表或来源解析失败时按没开任何联动处理，只是兜底，正常到不了这里 */
+const dataLinkSourcesResult = accountDeletionServicesResult.ok
+  ? parseDataLinkSources(raw.DATA_LINK_SOURCES, accountDeletionServicesResult.services)
+  : null;
+/** 打开的联动来源 → 来源后端的下游服务 */
+const dataLinkSources: ReadonlyMap<DataLinkSource, IDownstreamService> =
+  dataLinkSourcesResult !== null && dataLinkSourcesResult.ok
+    ? dataLinkSourcesResult.sources
+    : new Map<DataLinkSource, IDownstreamService>();
+
 /** 供全服务使用的已校验配置及派生选项；包含连接串与密钥，不可整体写入日志 */
 export const env = {
   ...raw,
@@ -152,6 +176,8 @@ export const env = {
       : null,
   /** 注销账号时按顺序调用的下游服务；未配置时为空 */
   accountDeletionServices: accountDeletionServicesResult.ok ? accountDeletionServicesResult.services : [],
+  /** 打开的数据联动来源 → 来源后端的下游服务（带地址与机器凭证）；没配时为空 Map。含凭证，不可写入日志 */
+  dataLinkSources,
   /**
    * 是否启用开发态免鉴权。
    * 生产环境无论如何配置都为 false，防止误开导致接口裸奔。

@@ -23,6 +23,7 @@ src/
 ├── config/env.ts               环境变量校验
 ├── config/products.ts          已接入的产品代号
 ├── config/account-deletion.ts  注销时要调用的下游服务列表与凭证的解析
+├── config/data-links.ts        数据联动来源（DATA_LINK_SOURCES）的解析，复用上面的下游服务
 ├── db/                         Drizzle 表定义（yado_hub schema）与连接池
 ├── middleware/
 │   ├── auth.ts                 Logto JWT 校验，拒绝注销名单里的用户
@@ -33,9 +34,14 @@ src/
 └── modules/
     ├── admin/index.ts          管理端汇总：GET /v1/admin/status，挂载各功能管理端
     ├── account/                注销账号 DELETE /v1/account
-    │   ├── deletion.ts         编排：注销名单 → 意见反馈 → 各下游服务 → Logto（不依赖数据库，可单独测试）
+    │   ├── deletion.ts         编排：注销名单 → 意见反馈 → 数据联动授权 → 各下游服务 → Logto（不依赖数据库，可单独测试）
     │   ├── service.ts          把编排接上配置、数据库与 Logto
     │   └── routes.ts           路由
+    ├── links/                  数据联动 /v1/links：授权记录与向来源后端取汇总
+    │   ├── schemas.ts          请求与响应契约，来源后端响应的校验 schema
+    │   ├── summary.ts          取汇总、判断能不能取、拼联动列表（不依赖数据库与环境变量，可单独测试）
+    │   ├── service.ts          授权记录（data_links）的读写
+    │   └── routes.ts           用户端：/v1/links/{source}/{target}/...
     └── feedback/               意见反馈
         ├── schemas.ts          请求与响应契约
         ├── service.ts          对话、反馈单、消息的读写与规则
@@ -73,6 +79,10 @@ pnpm run dev
 | POST | `/v1/feedback/{product}/messages` | 发消息，同一 `id` 重发幂等 |
 | POST | `/v1/feedback/{product}/read` | 标记已读到 `seq` |
 | GET | `/v1/feedback/{product}/unread` | 未读条数 |
+| GET | `/v1/links` | 数据联动列表：只列 `DATA_LINK_SOURCES` 里打开的来源，每项带是否已授权；没配时 `{"links": []}`，见下文「数据联动」 |
+| PUT | `/v1/links/yadoi/yadoa` | 授权芽豆有物给芽豆资产提供物品购入价汇总；可重复调用 |
+| DELETE | `/v1/links/yadoi/yadoa` | 取消授权；可重复调用，来源没开也能取消 |
+| GET | `/v1/links/yadoi/yadoa/item-value-summary` | 取汇总：在用、退役物品的购入价合计与件数，加 `fetchedAt` |
 | DELETE | `/v1/account` | 注销账号：删除各服务的数据和 Logto 用户，可重复调用，见下文「注销账号」 |
 
 管理端（`ADMIN_USER_IDS` 中的账号）：
@@ -105,11 +115,14 @@ agentd 用（机器凭证，不是 Logto 登录）：
 | 401 | `UNAUTHORIZED` | token 缺失或无效，或账号已注销（注销名单里的用户） |
 | 403 | `FORBIDDEN` | 不是管理员 |
 | 403 | `ACCOUNT_DELETED` | 发消息与注销同时发生、注销先完成 |
+| 403 | `DATA_LINK_NOT_GRANTED` | 取联动汇总时用户没授权（或已取消） |
 | 404 | `NOT_FOUND` | 对话或反馈单不存在 |
+| 404 | `DATA_LINK_UNAVAILABLE` | 联动来源没打开：授权与取汇总都会返回，取消授权不会 |
 | 409 | `MESSAGE_ID_CONFLICT` | 消息 ID 已被其他对话使用，换新 ID 重发 |
 | 409 | `TICKET_NOT_LATEST` | 只能把最新一条反馈单改回待处理 |
 | 429 | `TOO_MANY_REQUESTS` | 发消息超过限流，`details.rule` 为 `per_minute` 或 `per_day` |
 | 502 | `ACCOUNT_DELETION_FAILED` | 注销的某一步失败，`details.step` 是下游服务名或 `logto`；App 直接重试 |
+| 502 | `DATA_LINK_UPSTREAM_FAILED` | 向来源后端取汇总失败、超过 5 秒或响应不合契约 |
 | 503 | `SERVICE_NOT_CONFIGURED` | 注销所需的配置缺失（Logto M2M 凭证或下游服务列表），什么都没动 |
 
 ## 注销账号
@@ -119,10 +132,11 @@ agentd 用（机器凭证，不是 Logto 登录）：
 1. 把用户写进注销名单 `yado_hub.deleted_users`（永久保留）。之后这个用户的旧 token 访问 hub 的其他接口一律 401；
    注销接口本身用 `requireAuthIncludingDeleted`，所以中途失败后可以用同一个 token 重试。
 2. 删除 hub 自己的意见反馈（反馈单只留不含用户与正文的匿名统计）。
-3. 按 `ACCOUNT_DELETION_SERVICES` 的顺序调各下游服务的内部接口 `DELETE {地址}/internal/v1/users/{userId}`，
+3. 物理删除这个用户在 `yado_hub.data_links` 里的全部数据联动授权记录。
+4. 按 `ACCOUNT_DELETION_SERVICES` 的顺序调各下游服务的内部接口 `DELETE {地址}/internal/v1/users/{userId}`，
    每个服务用 `ACCOUNT_DELETION_TOKENS` 里各自的机器凭证。下游各自删数据、写自己的注销名单，可重复调用。
-4. 全部成功后，用 Logto Management API 删除 Logto 用户（404 算成功）。Logto 用户最后删：删了 App 就拿不到新 token，没法再重试。
-5. 记下 `completed_at`。
+5. 全部成功后，用 Logto Management API 删除 Logto 用户（404 算成功）。Logto 用户最后删：删了 App 就拿不到新 token，没法再重试。
+6. 记下 `completed_at`。
 
 任何一步失败（非 2xx、超时、网络错误）立即停下，返回 502 `ACCOUNT_DELETION_FAILED`，前面的步骤不回滚，App 重试时从头再走一遍。
 `deleted_users` 里 `completed_at` 为空的行就是中途失败、用户还没重试成功的注销，可以据此排查：
@@ -149,6 +163,21 @@ SELECT user_id, deleted_at FROM yado_hub.deleted_users WHERE completed_at IS NUL
 
 新的产品后端接入：在它那边实现 `DELETE /internal/v1/users/{userId}`（机器凭证鉴权、可重复调用，照 yadoA_be 的 `modules/internal`），
 生成一对凭证，在 hub 的两个变量里各加一项，重启 hub。
+
+## 数据联动
+
+用户在芽豆资产里主动授权后，hub 用机器凭证向芽豆有物的后端（yadoi-be）要这个用户的物品购入价汇总，芽豆资产在账户页显示「物品估值」。
+hub 只存授权记录（`yado_hub.data_links`：用户、来源 `yadoi`、使用方 `yadoa`、范围 `item_value_summary`、授权与取消时刻），
+不存任何汇总数；每次取汇总都现向来源后端要。接口路径用 `{source}/{target}`，不是 `{product}`，路径参数不在 `yadoi` / `yadoa` 里返回 400。
+
+- `GET /v1/links` 只列 `DATA_LINK_SOURCES` 里打开的来源；`PUT` 授权，撤销后再授权会清掉取消标记并更新授权时刻；`DELETE` 取消授权，来源有没有打开都可以调。
+- `GET /v1/links/yadoi/yadoa/item-value-summary`：来源没开返回 404，没授权返回 403；已授权就带 yadoi-be 的机器凭证调
+  `GET {地址}/internal/v1/users/{userId}/item-value-summary`，5 秒超时，失败、超时或响应不合契约都返回 502，成功时原样返回汇总数并加 `fetchedAt`。
+- 四个接口都要 Logto 登录并按用户限流（每分钟 60 次、每天 3000 次，写在 `middleware/rate-limit.ts`）。
+- 配置：`DATA_LINK_SOURCES`（见 `.env.example`），逗号分隔，目前只认 `yadoi`，默认空即不开任何联动。来源后端的地址与凭证复用
+  `ACCOUNT_DELETION_SERVICES` / `ACCOUNT_DELETION_TOKENS` 里的 `yadoi-be`；打开 `yadoi` 却找不到 `yadoi-be`、或写了不认识 / 重复的来源，服务启动失败。
+  dev 配 `yadoi`，线上等芽豆有物上架那天再配。
+- 日志只记事件、用户 ID 与来源，不记金额；取汇总失败时记 `data_link_upstream_failed`（服务名、用户 ID、状态码或错误名，不含地址和凭证）。
 
 ## 常用脚本
 
