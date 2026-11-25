@@ -29,12 +29,14 @@ src/
 │   ├── admin.ts                管理员校验（ADMIN_USER_IDS）
 │   ├── machine.ts              agentd 的机器凭证校验（AGENT_MACHINE_TOKENS）
 │   └── rate-limit.ts           按用户限流
-├── shared/                     统一错误、OpenAPIHono 工厂、注销名单读写、Logto Management API 客户端
+├── shared/                     统一错误、OpenAPIHono 工厂、注销名单读写、Logto JWKS 验签、Logto Management API 客户端
 └── modules/
     ├── admin/index.ts          管理端汇总：GET /v1/admin/status，挂载各功能管理端
-    ├── account/                注销账号 DELETE /v1/account
+    ├── account/                注销账号 /v1/account（验证身份、数据汇总、注销）
     │   ├── deletion.ts         编排：注销名单 → 意见反馈 → 各下游服务 → Logto（不依赖数据库，可单独测试）
-    │   ├── service.ts          把编排接上配置、数据库与 Logto
+    │   ├── verification.ts     注销前验证身份、一次性注销票据（内存，不依赖数据库，可单独测试）
+    │   ├── summary.ts          注销前各产品数据量汇总：并行调各下游的只读 summary 接口（可单独测试）
+    │   ├── service.ts          把编排、验证、汇总接上配置、数据库与 Logto
     │   └── routes.ts           路由
     └── feedback/               意见反馈
         ├── schemas.ts          请求与响应契约
@@ -73,7 +75,10 @@ pnpm run dev
 | POST | `/v1/feedback/{product}/messages` | 发消息，同一 `id` 重发幂等 |
 | POST | `/v1/feedback/{product}/read` | 标记已读到 `seq` |
 | GET | `/v1/feedback/{product}/unread` | 未读条数 |
-| DELETE | `/v1/account` | 注销账号：删除各服务的数据和 Logto 用户，可重复调用，见下文「注销账号」 |
+| GET | `/v1/account/summary` | 注销前各产品的数据量汇总（并行调各下游，某个失败只标那一项），见下文「注销账号」 |
+| POST | `/v1/account/verification/email-code` | 注销前验证身份：把验证码发到 Logto 里的主邮箱 |
+| POST | `/v1/account/verification` | 注销前验证身份：密码、邮箱验证码或重新登录的 ID token 三选一，通过后返回 10 分钟有效的注销票据 |
+| DELETE | `/v1/account` | 注销账号：必须带 `X-Account-Deletion-Ticket`；删除各服务的数据和 Logto 用户，可重复调用，见下文「注销账号」 |
 
 管理端（`ADMIN_USER_IDS` 中的账号）：
 
@@ -102,22 +107,46 @@ agentd 用（机器凭证，不是 Logto 登录）：
 | 状态码 | code | 含义 |
 | --- | --- | --- |
 | 400 | `BAD_REQUEST` | 参数校验失败 |
+| 400 | `IDENTITY_VERIFICATION_FAILED` | 注销前验证身份没通过，`details.reason`：`wrong_password`、`code_mismatch`、`code_invalid`、`email_unavailable`、`login_not_recent` |
 | 401 | `UNAUTHORIZED` | token 缺失或无效，或账号已注销（注销名单里的用户） |
 | 403 | `FORBIDDEN` | 不是管理员 |
 | 403 | `ACCOUNT_DELETED` | 发消息与注销同时发生、注销先完成 |
+| 403 | `ACCOUNT_VERIFICATION_REQUIRED` | 注销票据无效、已过期或不属于当前用户，App 回到验证身份这一步 |
 | 404 | `NOT_FOUND` | 对话或反馈单不存在 |
 | 409 | `MESSAGE_ID_CONFLICT` | 消息 ID 已被其他对话使用，换新 ID 重发 |
 | 409 | `TICKET_NOT_LATEST` | 只能把最新一条反馈单改回待处理 |
-| 429 | `TOO_MANY_REQUESTS` | 发消息超过限流，`details.rule` 为 `per_minute` 或 `per_day` |
+| 426 | `APP_UPGRADE_REQUIRED` | `DELETE /v1/account` 没带 `X-Account-Deletion-Ticket`（旧版 App），提示更新 |
+| 429 | `TOO_MANY_REQUESTS` | 发消息或注销前验证身份超过限流，`details.rule` 为 `per_minute` 或 `per_day` |
 | 502 | `ACCOUNT_DELETION_FAILED` | 注销的某一步失败，`details.step` 是下游服务名或 `logto`；App 直接重试 |
-| 503 | `SERVICE_NOT_CONFIGURED` | 注销所需的配置缺失（Logto M2M 凭证或下游服务列表），什么都没动 |
+| 502 | `IDENTITY_VERIFICATION_UNAVAILABLE` | 注销前验证身份时调 Logto 失败（网络、超时、没预期的响应），可稍后重试 |
+| 503 | `SERVICE_NOT_CONFIGURED` | 注销所需的配置缺失（Logto M2M 凭证、下游服务列表，或用重新登录验证但 `LOGTO_APP_IDS` 为空），什么都没动 |
 
 ## 注销账号
 
-所有芽豆 App 共用一个 Logto 账号，各 App 注销只调 hub 的 `DELETE /v1/account`。hub 按顺序做：
+所有芽豆 App 共用一个 Logto 账号，各 App 注销只调 hub 的 `/v1/account` 下的接口。完整流程分三步：
+
+**注销前汇总**：`GET /v1/account/summary`，确认页用它显示各产品的数据量。hub 用 `ACCOUNT_DELETION_SERVICES` / `ACCOUNT_DELETION_TOKENS`
+里同样的机器凭证，并行调各下游的只读接口 `GET {地址}/internal/v1/users/{userId}/summary`，每个下游 10 秒超时，总时长约 10 秒。
+某个下游失败或超时只把那一项标为 `unavailable`，不影响注销；数量为 0 的项和没有任何项的服务已被去掉。
+各下游返回的 key 固定：yado-ai 是 `points_balance`（剩余点数），yadoa-be 是 `synced_records`（同步的记录数），yadoi-be 是 `items`（物品件数）。
+
+**验证身份**：拿着一个很久以前登录的 token 不能直接删账号，注销前必须先证明是本人，换一张 10 分钟有效的注销票据。
+`POST /v1/account/verification` 的请求体三选一：
+- `{"method":"password","password":"…"}`：hub 调 Logto Management API 校验密码；
+- `{"method":"email_code","code":"123456"}`：先 `POST /v1/account/verification/email-code`，hub 用 Management API 把验证码发到 Logto 里的主邮箱，
+  再让 Logto 校验；账号没有主邮箱（例如只用 Apple 登录）时返回 400 `email_unavailable`；
+- `{"method":"id_token","idToken":"…"}`：App 重新登录（authorize 请求带 `max_age=0`）后把 ID token 交来，hub 验签并要求 `sub` 是当前用户、
+  `aud` 在 `LOGTO_APP_IDS` 里、`auth_time` 在 5 分钟以内。
+
+通过后返回 `{ticket, expiresAt}`，同一用户再次验证会让旧票据失效。票据只放内存（只存 sha256），和限流计数一样基于单实例部署，hub 重启后用户重新验证一次即可。
+这两个验证接口每个用户每分钟最多 5 次、每天最多 30 次（共用额度），超出返回 429。密码、验证码、ID token 只转给 Logto 或本地验签，不落库、不写日志。
+
+**注销**：`DELETE /v1/account` 必须带请求头 `X-Account-Deletion-Ticket`：不带返回 426 `APP_UPGRADE_REQUIRED`（旧版 App），票据无效、过期或不属于当前用户
+返回 403 `ACCOUNT_VERIFICATION_REQUIRED`；注销成功后票据作废，失败时在有效期内可以拿同一张票据重试。只有开发态免鉴权（`AUTH_DEV_BYPASS`）跳过这项检查。
+通过后 hub 按顺序做：
 
 1. 把用户写进注销名单 `yado_hub.deleted_users`（永久保留）。之后这个用户的旧 token 访问 hub 的其他接口一律 401；
-   注销接口本身用 `requireAuthIncludingDeleted`，所以中途失败后可以用同一个 token 重试。
+   `/v1/account` 下的注销相关接口用 `requireAuthIncludingDeleted`，所以中途失败后可以用同一个 token 重新验证并重试。
 2. 删除 hub 自己的意见反馈（反馈单只留不含用户与正文的匿名统计）。
 3. 按 `ACCOUNT_DELETION_SERVICES` 的顺序调各下游服务的内部接口 `DELETE {地址}/internal/v1/users/{userId}`，
    每个服务用 `ACCOUNT_DELETION_TOKENS` 里各自的机器凭证。下游各自删数据、写自己的注销名单，可重复调用。
@@ -132,6 +161,7 @@ SELECT user_id, deleted_at FROM yado_hub.deleted_users WHERE completed_at IS NUL
 ```
 
 每个下游 10 秒超时，Logto 换 token、删用户各 10 秒，最坏约 50 秒，低于 nginx 默认的 60 秒；加下游服务时要一起核对。
+发验证码最坏要等 Logto 的换 token、查用户、发码三次调用，约 30 秒，也低于 60 秒。
 
 配置（见 `.env.example`）：
 
@@ -142,9 +172,14 @@ SELECT user_id, deleted_at FROM yado_hub.deleted_users WHERE completed_at IS NUL
   TOKEN=$(openssl rand -hex 32)                        # 填进 hub 的 ACCOUNT_DELETION_TOKENS，例如 yado-ai:$TOKEN
   printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1   # 填进对方的 INTERNAL_MACHINE_TOKENS=yado-hub:<这串>
   ```
-- `LOGTO_M2M_APP_ID`、`LOGTO_M2M_APP_SECRET`：Logto 机器对机器应用，分配带 Logto Management API「all」权限的角色。
-- 真实用户缺 Logto 凭证或一个下游都没配时返回 503，什么都不动；格式错误或服务与凭证对不上时服务启动失败。
-- 开发态免鉴权（`AUTH_DEV_BYPASS=true`）的假用户不删 Logto 用户，下游配了几个调几个。调过一次注销后，`AUTH_DEV_USER_ID`
+- `LOGTO_M2M_APP_ID`、`LOGTO_M2M_APP_SECRET`：Logto 机器对机器应用，分配带 Logto Management API「all」权限的角色；
+  删除 Logto 用户、验证身份（校验密码、取主邮箱、发送与校验验证码）都用它。
+- `LOGTO_APP_IDS`：芽豆各 App 在 Logto 的原生应用 ID，逗号分隔（dev 是 `7snnjg90shlsuamug4zez`，线上是 `rgne9x102v0qrifpqakl6`）。
+  用重新登录验证身份时 ID token 的 `aud` 必须是其中之一；留空时这种方式返回 503，只用 Apple 登录的账号就无法注销。
+- 发验证码走 Logto Management API 的 `/api/verification-codes`，要求 Logto 的邮件连接器配了 Generic 模板；上线时要发一次验证码确认能收到。
+- 真实用户缺 Logto 凭证或一个下游都没配时注销返回 503，什么都不动；格式错误或服务与凭证对不上时服务启动失败。
+  汇总接口没配下游时返回空列表，不报 503。
+- 开发态免鉴权（`AUTH_DEV_BYPASS=true`）的假用户不删 Logto 用户，下游配了几个调几个，注销时也不检查票据（验证身份接口仍要调 Logto，假用户在 Logto 里不存在，会失败）。调过一次注销后，`AUTH_DEV_USER_ID`
   就在注销名单里，本地其他接口都会 401；要恢复执行 `DELETE FROM yado_hub.deleted_users WHERE user_id = '<AUTH_DEV_USER_ID>';`，或换一个用户 ID。
 
 新的产品后端接入：在它那边实现 `DELETE /internal/v1/users/{userId}`（机器凭证鉴权、可重复调用，照 yadoA_be 的 `modules/internal`），

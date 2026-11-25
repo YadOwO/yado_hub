@@ -15,11 +15,12 @@ import { accountDeletionFailed, serviceNotConfigured } from '../../shared/errors
  *
  * 三个下游各 10 秒、Logto 换 token 与删用户各 10 秒，最坏约 50 秒，低于 nginx 默认的 60 秒读超时；
  * 加下游服务时要一起核对，App 的请求超时也要比总时长长。
+ * 注销前的数据汇总（summary.ts）是并行调各下游，每个下游也是 10 秒，总时长约 10 秒。
  */
 export const DOWNSTREAM_DELETION_TIMEOUT_MS = 10_000;
 
-/** 下游服务内部删除接口的路径前缀，后面接 URL 编码后的用户 ID */
-const INTERNAL_USERS_PATH = '/internal/v1/users/';
+/** 下游服务内部接口的路径前缀，后面接 URL 编码后的用户 ID；删除与汇总（summary.ts）共用 */
+export const INTERNAL_USERS_PATH = '/internal/v1/users/';
 
 /** 决定这次注销要做哪些步骤所需的配置 */
 export interface IAccountDeletionConfig {
@@ -119,8 +120,8 @@ export interface IDownstreamDeletionOptions {
   timeoutMs?: number;
 }
 
-/** 从捕获的异常中取出可安全写入日志的错误名，不带 message */
-function errorName(error: unknown): string {
+/** 从捕获的异常中取出可安全写入日志的错误名，不带 message；删除与汇总（summary.ts）共用 */
+export function errorName(error: unknown): string {
   return error instanceof Error ? error.name : 'UnknownError';
 }
 

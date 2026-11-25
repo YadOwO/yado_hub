@@ -104,3 +104,18 @@ export const feedbackMessageRateLimit = createUserRateLimit(
   env.FEEDBACK_RATE_LIMIT_PER_MINUTE,
   env.FEEDBACK_RATE_LIMIT_PER_DAY,
 );
+
+/** 注销前验证身份：每个用户每分钟最多尝试（含发验证码）的次数，防止暴力试密码、试验证码 */
+const ACCOUNT_VERIFICATION_RATE_LIMIT_PER_MINUTE = 5;
+
+/** 注销前验证身份：每个用户每天最多尝试（含发验证码）的次数；发验证码也会给用户的邮箱发邮件，不能无限发 */
+const ACCOUNT_VERIFICATION_RATE_LIMIT_PER_DAY = 30;
+
+/**
+ * 限制注销前验证身份的频率：密码和验证码的尝试、发送验证码共用同一份额度。
+ * 注销是低频操作，正常用户几次内就能完成，额度写死在这里，不开环境变量。
+ */
+export const accountVerificationRateLimit = createUserRateLimit(
+  ACCOUNT_VERIFICATION_RATE_LIMIT_PER_MINUTE,
+  ACCOUNT_VERIFICATION_RATE_LIMIT_PER_DAY,
+);

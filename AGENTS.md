@@ -61,7 +61,8 @@ modules/<功能>/routes.ts         用户端路由，挂在 /v1/<功能> 下，�
 modules/<功能>/admin-routes.ts   管理端路由，由 modules/admin 挂到 /v1/admin/<功能>
 modules/admin/index.ts          管理端汇总与管理入口状态，可以引用各功能的 service
 modules/account/                注销账号 DELETE /v1/account：各 App 注销只调这里，hub 编排「注销名单 → 各功能数据 → 各下游服务的
-                                内部删除接口 → 删 Logto 用户」（deletion.ts），可以引用各功能的 service
+                                内部删除接口 → 删 Logto 用户」（deletion.ts），可以引用各功能的 service；注销前验证身份、发一次性注销票据
+                                （verification.ts），注销前数据汇总（summary.ts，并行调各下游的 GET /internal/v1/users/{userId}/summary）
 config/products.ts              已接入的产品代号
 config/account-deletion.ts      注销时要调用的下游服务列表（ACCOUNT_DELETION_SERVICES / ACCOUNT_DELETION_TOKENS）的解析
 db/                             Drizzle 表定义（yado_hub schema）与连接池
@@ -91,9 +92,12 @@ middleware/                     请求级横切逻辑（鉴权、管理员、限
   会造成接口绕过鉴权。
 - 例外：`/v1/agents` 下的同步接口只给 Mac 上的 agentd 调用，挂 `requireMachine`（机器凭证），不挂 Logto
   鉴权。凭证只在 `AGENT_MACHINE_TOKENS` 存 sha256；不要把其他接口挂到机器凭证上。
-- `requireAuth` 会拒绝注销名单（`yado_hub.deleted_users`）里的用户；只有 `DELETE /v1/account` 用
-  `requireAuthIncludingDeleted`，使注销中途失败的用户可以重试。注销的步骤失败要立即停下并返回错误，不要吞掉错误继续删 Logto 用户。
+- `requireAuth` 会拒绝注销名单（`yado_hub.deleted_users`）里的用户；只有 `/v1/account` 下的注销相关接口（`DELETE /v1/account`、
+  注销前验证身份、注销前数据汇总）用 `requireAuthIncludingDeleted`，使注销中途失败的用户可以重新验证并重试。
+  注销的步骤失败要立即停下并返回错误，不要吞掉错误继续删 Logto 用户。
 - `ACCOUNT_DELETION_TOKENS` 是 hub 调下游服务内部接口的凭证明文，只能放在请求头里发给对应的服务，不要写进日志或错误响应。
+- `DELETE /v1/account` 必须先校验注销票据（`X-Account-Deletion-Ticket`）；验证身份时收到的密码、验证码、ID token 只转给 Logto 或本地验签，
+  不落库、不写日志、不进错误响应；票据只在内存里存 sha256。
 - agent 同步只存摘要：不要扩展成接收代码、diff、模型原始输出或本机路径。页面能发给 Mac 的指令只限
   `modules/agents/schemas.ts` 中的白名单，新增指令要两边（hub 与 yado_agents）一起评估。
 - 用户端查询一律按当前用户过滤，只能读写自己的数据。

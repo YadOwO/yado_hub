@@ -7,29 +7,14 @@
  */
 import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { jwtVerify } from 'jose';
 
 import { env } from '../config/env.js';
 import { parseBearerToken } from '../shared/bearer.js';
 import { isUserDeleted } from '../shared/deleted-users.js';
 import { unauthorized } from '../shared/errors.js';
+import { getLogtoJwks } from '../shared/logto-jwks.js';
 import type { AppEnv } from '../types.js';
-
-/** 远程验签公钥的解析器类型，缓存与刷新由 jose 管理 */
-type RemoteJWKSet = ReturnType<typeof createRemoteJWKSet>;
-
-/** 进程内复用公钥解析器，避免每次请求重建缓存与远程获取状态 */
-let jwksCache: RemoteJWKSet | null = null;
-
-/**
- * 延迟初始化 JWKS，避免开发态免鉴权时仍要求 Logto 地址可用。
- */
-function getJwks(): RemoteJWKSet {
-  if (jwksCache === null) {
-    jwksCache = createRemoteJWKSet(new URL(env.logtoJwksUrl));
-  }
-  return jwksCache;
-}
 
 /** 从 Authorization 头中提取 Bearer token */
 function extractBearerToken(header: string | undefined): string {
@@ -55,7 +40,7 @@ async function resolveUserId(c: Context<AppEnv>): Promise<string> {
   const token = extractBearerToken(c.req.header('Authorization'));
 
   try {
-    const { payload } = await jwtVerify(token, getJwks(), {
+    const { payload } = await jwtVerify(token, getLogtoJwks(), {
       issuer: env.LOGTO_ISSUER,
       audience: env.LOGTO_AUDIENCE,
     });
@@ -86,8 +71,8 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
 });
 
 /**
- * 只验签、不查注销名单的鉴权，仅给注销账号 DELETE /v1/account 用：注销中途失败后，
- * 用户已经在注销名单里，要靠它才能用同一个 token 重试。
+ * 只验签、不查注销名单的鉴权，仅给 /v1/account 下注销相关的接口用（注销、注销前验证身份、注销前数据汇总）：
+ * 注销中途失败后，用户已经在注销名单里，要靠它才能用同一个 token 重新验证身份并重试。
  */
 export const requireAuthIncludingDeleted = createMiddleware<AppEnv>(async (c, next) => {
   c.set('userId', await resolveUserId(c));

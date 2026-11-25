@@ -77,6 +77,11 @@ const envSchema = z.object({
   LOGTO_M2M_APP_SECRET: optionalNonEmptyString,
   /** Logto Management API 的 resource indicator；留空时用 Logto 内置值 */
   LOGTO_MANAGEMENT_RESOURCE: optionalNonEmptyString,
+  /**
+   * 芽豆各 App 在 Logto 的原生应用 ID，逗号分隔。注销前用重新登录验证身份时，App 交来的 ID token 的 aud
+   * 必须是其中之一；留空时这种验证方式返回 503（密码和邮箱验证码不受影响）。
+   */
+  LOGTO_APP_IDS: z.string().default(''),
 
   /**
    * 注销账号时按顺序调用的下游服务：`服务名=容器内网地址`，逗号分隔，
@@ -145,6 +150,8 @@ export const env = {
       : null,
   /** 注销账号时按顺序调用的下游服务；未配置时为空 */
   accountDeletionServices: accountDeletionServicesResult.ok ? accountDeletionServicesResult.services : [],
+  /** 允许的 App 在 Logto 的应用 ID 集合，用来校验重新登录的 ID token 的 aud；未配置时为空 */
+  logtoAppIds: new Set(splitCommaSeparated(raw.LOGTO_APP_IDS)),
   /**
    * 是否启用开发态免鉴权。
    * 生产环境无论如何配置都为 false，防止误开导致接口裸奔。
