@@ -7,16 +7,9 @@ import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 
 import { parseAccountDeletionServices } from './account-deletion.js';
+import { splitCommaSeparated } from './comma-separated.js';
 
 loadDotenv({ quiet: true });
-
-/** 把逗号分隔的配置拆成列表，去掉每项首尾空白并丢弃空项 */
-function splitCommaSeparated(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
 
 /**
  * 可选的非空字符串。.env 里写成 `KEY=` 会得到空字符串，这里把空字符串（含只有空白）视为未配置，

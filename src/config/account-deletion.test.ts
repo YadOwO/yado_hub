@@ -74,6 +74,16 @@ describe('parseAccountDeletionServices', () => {
     );
   });
 
+  it('两个服务用了同一个凭证时报错，错误说明里不带凭证内容', () => {
+    const sharedToken = token('a');
+    const message = parseError(
+      'yado-ai=http://yado-ai:7790,yadoa-be=http://yadoa-be:7789',
+      `yado-ai:${sharedToken},yadoa-be:${sharedToken}`,
+    );
+    assert.match(message, /yadoa-be 的凭证和其他服务重复/);
+    assert.ok(!message.includes(sharedToken));
+  });
+
   it('地址不是 http(s) 时报错', () => {
     for (const url of ['ftp://yado-ai', 'yado-ai:7790', 'not a url']) {
       assert.match(parseError(`yado-ai=${url}`, `yado-ai:${token('a')}`), /地址应为/, url);

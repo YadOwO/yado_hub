@@ -5,6 +5,7 @@
  * （`DELETE {地址}/internal/v1/users/{userId}`），每个服务用 ACCOUNT_DELETION_TOKENS 里各自的机器凭证。
  * 本文件不 import config/env.ts，单元测试不需要环境变量。
  */
+import { splitCommaSeparated } from './comma-separated.js';
 
 /** 注销时要调用的一个下游服务 */
 export interface IDownstreamService {
@@ -16,19 +17,11 @@ export interface IDownstreamService {
   token: string;
 }
 
-/** 服务名的格式，与 agent 机器 ID 的规则一致 */
+/** 服务名的格式：小写字母、数字和 -，最长 40 位 */
 const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 /** 机器凭证的格式：至少 32 位，只含 base64 / 十六进制会用到的字符，不能有逗号、冒号与空白 */
 const TOKEN_PATTERN = /^[A-Za-z0-9+/=_-]{32,}$/;
-
-/** 把逗号分隔的配置拆成列表，去掉每项首尾空白并丢弃空项 */
-function splitItems(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
 
 /** 按第一个分隔符把一项拆成两段；没有分隔符或任一段为空时返回 null */
 function splitPair(item: string, separator: string): [string, string] | null {
@@ -65,11 +58,13 @@ export type AccountDeletionServicesResult =
  * - tokensValue：`服务名:凭证`，逗号分隔，每个服务一个，例如 `yado-ai:<凭证>,yadoa-be:<凭证>`。
  *
  * 两项都为空（含只有空白）时返回空列表，表示未配置。服务名重复、地址不是 http(s)、
- * 某个服务缺凭证、凭证对应的服务不在列表里，都算配置错误。
+ * 某个服务缺凭证、凭证对应的服务不在列表里、两个服务用了同一个凭证，都算配置错误。
  */
 export function parseAccountDeletionServices(servicesValue: string, tokensValue: string): AccountDeletionServicesResult {
   const tokens = new Map<string, string>();
-  for (const item of splitItems(tokensValue)) {
+  /** 已出现过的凭证；每个下游必须用不同的凭证，防止一个下游泄露的凭证被拿去调其他下游的内部删除接口 */
+  const seenTokens = new Set<string>();
+  for (const item of splitCommaSeparated(tokensValue)) {
     const pair = splitPair(item, ':');
     if (pair === null || !SERVICE_NAME_PATTERN.test(pair[0])) {
       return { ok: false, message: 'ACCOUNT_DELETION_TOKENS 每项应为 服务名:凭证，服务名只含小写字母、数字和 -' };
@@ -81,11 +76,18 @@ export function parseAccountDeletionServices(servicesValue: string, tokensValue:
     if (tokens.has(name)) {
       return { ok: false, message: `ACCOUNT_DELETION_TOKENS 里 ${name} 出现了不止一次` };
     }
+    if (seenTokens.has(token)) {
+      return {
+        ok: false,
+        message: `ACCOUNT_DELETION_TOKENS 里 ${name} 的凭证和其他服务重复，每个服务要单独用 openssl rand -hex 32 生成`,
+      };
+    }
+    seenTokens.add(token);
     tokens.set(name, token);
   }
 
   const services: IDownstreamService[] = [];
-  for (const item of splitItems(servicesValue)) {
+  for (const item of splitCommaSeparated(servicesValue)) {
     const pair = splitPair(item, '=');
     if (pair === null || !SERVICE_NAME_PATTERN.test(pair[0])) {
       return { ok: false, message: 'ACCOUNT_DELETION_SERVICES 每项应为 服务名=地址，服务名只含小写字母、数字和 -' };
