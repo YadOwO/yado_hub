@@ -112,8 +112,13 @@ const itemValueSummaryRoute = createRoute({
 });
 
 app.openapi(listLinksRoute, async (c) => {
+  const sources = [...env.dataLinkSources.keys()];
+  // 一个来源都没打开时直接返回空列表，不查授权表：线上默认不开联动，这样这个接口不依赖 data_links 表
+  if (sources.length === 0) {
+    return c.json({ links: [] }, 200);
+  }
   const granted = await listGrantedAt(c.get('userId'));
-  return c.json(buildLinkList([...env.dataLinkSources.keys()], granted), 200);
+  return c.json(buildLinkList(sources, granted), 200);
 });
 
 app.openapi(grantLinkRoute, async (c) => {
