@@ -93,7 +93,7 @@ export const ticketNotLatest = (): AppError =>
   new AppError(409, ErrorCode.TicketNotLatest, '只能把最新一条反馈单改回待处理');
 
 /**
- * 已通过鉴权的发消息请求在事务里发现用户已进注销名单时返回 403（注销与发消息同时发生）；
+ * 已通过鉴权的发消息、数据联动授权请求在事务里发现用户已进注销名单时返回 403（注销与它们同时发生）；
  * 注销之后的新请求在鉴权时就返回 401，到不了这里。
  */
 export const accountDeleted = (): AppError => new AppError(403, ErrorCode.AccountDeleted, '账号已注销');

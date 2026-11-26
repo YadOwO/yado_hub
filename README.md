@@ -114,7 +114,7 @@ agentd 用（机器凭证，不是 Logto 登录）：
 | 400 | `BAD_REQUEST` | 参数校验失败 |
 | 401 | `UNAUTHORIZED` | token 缺失或无效，或账号已注销（注销名单里的用户） |
 | 403 | `FORBIDDEN` | 不是管理员 |
-| 403 | `ACCOUNT_DELETED` | 发消息与注销同时发生、注销先完成 |
+| 403 | `ACCOUNT_DELETED` | 发消息或授权数据联动与注销同时发生、注销先完成 |
 | 403 | `DATA_LINK_NOT_GRANTED` | 取联动汇总时用户没授权（或已取消） |
 | 404 | `NOT_FOUND` | 对话或反馈单不存在 |
 | 404 | `DATA_LINK_UNAVAILABLE` | 联动来源没打开：授权与取汇总都会返回，取消授权不会 |

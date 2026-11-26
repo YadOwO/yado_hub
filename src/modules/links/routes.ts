@@ -51,7 +51,8 @@ const grantLinkRoute = createRoute({
   summary: '授权数据联动',
   description:
     '用户同意把来源产品的物品购入价汇总提供给目标产品。可以重复调用，已授权时不改授权时刻；' +
-    '取消后再授权会清掉取消标记，授权时刻更新为当时。来源没打开时返回 404 DATA_LINK_UNAVAILABLE。',
+    '取消后再授权会清掉取消标记，授权时刻更新为当时。来源没打开时返回 404 DATA_LINK_UNAVAILABLE；' +
+    '授权与注销账号同时发生、注销先完成时返回 403 ACCOUNT_DELETED。',
   middleware: [requireAuth, dataLinkRateLimit] as const,
   security: [{ Bearer: [] }],
   request: { params: LinkParamsSchema },
@@ -59,6 +60,7 @@ const grantLinkRoute = createRoute({
     200: { description: '授权后的状态', content: { 'application/json': { schema: DataLinkSchema } } },
     400: jsonError('路径参数不在支持的来源与目标里'),
     401: jsonError('未通过身份校验'),
+    403: jsonError('账号正在注销或已注销，code 为 ACCOUNT_DELETED'),
     404: jsonError('联动来源没有打开，code 为 DATA_LINK_UNAVAILABLE'),
     429: jsonError('调用过于频繁，details.rule 为 per_minute 或 per_day'),
   },

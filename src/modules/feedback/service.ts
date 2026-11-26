@@ -27,6 +27,7 @@ import {
 import { isUserDeleted } from '../../shared/deleted-users.js';
 import { accountDeleted, messageIdConflict, notFound, ticketNotLatest } from '../../shared/errors.js';
 import { type IPage, toPage } from '../../shared/pagination.js';
+import { lockUserScope } from '../../shared/user-lock.js';
 import { deleteUserFeedback, type IUserFeedbackDeletionOps } from './account-deletion.js';
 
 /**
@@ -35,7 +36,7 @@ import { deleteUserFeedback, type IUserFeedbackDeletionOps } from './account-del
  * 只有这两条路径取这把锁，而且都在锁对话行之前取；管理员回复、改状态不取它，所以不会死锁。
  */
 async function lockUserFeedback(tx: DbTransaction, userId: string): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${'feedback_user:' + userId}, 0))`);
+  await lockUserScope(tx, 'feedback_user', userId);
 }
 
 /** 写入一条消息所需的内容 */
