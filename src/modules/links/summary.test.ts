@@ -135,6 +135,16 @@ describe('fetchItemValueSummary', () => {
     }
   });
 
+  it('lastItemUpdatedAt 不是 ISO 8601 时刻抛 502', async () => {
+    for (const lastItemUpdatedAt of ['yesterday', '2026-11-23 10:00:00', '1732356000']) {
+      await assert.rejects(
+        fetchItemValueSummary(SERVICE, 'u1', { fetch: fakeFetch(200, { ...SUMMARY, lastItemUpdatedAt }) }),
+        isUpstreamFailure,
+        lastItemUpdatedAt,
+      );
+    }
+  });
+
   it('失败日志不带凭证与地址', async () => {
     const errorLog = mock.method(console, 'error', () => undefined);
     await assert.rejects(fetchItemValueSummary(SERVICE, 'u1', { fetch: fakeFetch(500, 'oops') }), isUpstreamFailure);

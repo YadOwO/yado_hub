@@ -56,7 +56,7 @@ export const ItemValueSummarySchema = z.object({
   retiredPurchaseTotal: MoneySchema.openapi({ description: '退役物品的购入价合计', example: '300.00' }),
   pricedItemCount: z.number().int().min(0).openapi({ description: '填了购入价的物品件数', example: 12 }),
   unpricedItemCount: z.number().int().min(0).openapi({ description: '没填购入价的物品件数', example: 2 }),
-  lastItemUpdatedAt: z.string().nullable().openapi({
+  lastItemUpdatedAt: z.iso.datetime().nullable().openapi({
     description: '这批物品里最近一次更新的时刻，ISO 8601；没有物品时为 null',
     example: '2026-11-23T10:00:00.000Z',
   }),

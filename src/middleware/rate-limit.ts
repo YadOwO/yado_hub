@@ -120,6 +120,22 @@ export const accountVerificationRateLimit = createUserRateLimit(
   ACCOUNT_VERIFICATION_RATE_LIMIT_PER_DAY,
 );
 
+/** 注销前数据汇总：每个用户每分钟最多调用的次数；只有注销确认页才会调，正常使用几次内就够 */
+const ACCOUNT_SUMMARY_RATE_LIMIT_PER_MINUTE = 10;
+
+/** 注销前数据汇总：每个用户每天最多调用的次数 */
+const ACCOUNT_SUMMARY_RATE_LIMIT_PER_DAY = 200;
+
+/**
+ * 限制注销前数据汇总的频率。取汇总会并行转调各下游服务（最多 3 个，各 10 秒超时），
+ * 不限流的话任何登录用户都能把 hub 当成打向下游的流量放大器，所以要限流。
+ * 单独一份额度，不和验证身份共用：共用的话，打开确认页会占掉试密码的次数。
+ */
+export const accountSummaryRateLimit = createUserRateLimit(
+  ACCOUNT_SUMMARY_RATE_LIMIT_PER_MINUTE,
+  ACCOUNT_SUMMARY_RATE_LIMIT_PER_DAY,
+);
+
 /**
  * 数据联动接口每个用户每分钟最多调用的次数。
  * App 在账户页出现与下拉刷新时才取汇总（距上次成功不到 5 分钟不再取），正常使用远低于此；

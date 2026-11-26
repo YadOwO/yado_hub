@@ -6,7 +6,7 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 
 import { env } from '../config/env.js';
-import { identityVerificationFailed } from './errors.js';
+import { errorName, identityVerificationFailed } from './errors.js';
 
 /** 远程验签公钥的解析器类型，缓存与刷新由 jose 管理 */
 type RemoteJWKSet = ReturnType<typeof createRemoteJWKSet>;
@@ -53,7 +53,7 @@ export async function verifyLogtoIdToken(
       audience: [...audiences],
     }));
   } catch (error) {
-    console.warn('ID token 校验失败：', error instanceof Error ? error.name : 'UnknownError');
+    console.warn('ID token 校验失败：', errorName(error));
     throw identityVerificationFailed('login_not_recent');
   }
 

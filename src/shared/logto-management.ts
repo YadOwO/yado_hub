@@ -7,7 +7,7 @@
  * 日志只记录步骤、状态码和错误名，绝不记录 token、密钥、密码、验证码与邮箱。
  * 本文件不 import config/env.ts，配置由调用方传入，方便单独测试。
  */
-import { accountDeletionFailed, identityVerificationUnavailable, type AppError } from './errors.js';
+import { accountDeletionFailed, errorName, identityVerificationUnavailable, type AppError } from './errors.js';
 
 /** 注销失败时 details.step 的取值，表示卡在删除 Logto 用户这一步 */
 export const LOGTO_DELETION_STEP = 'logto';
@@ -140,11 +140,6 @@ function parseErrorCode(body: unknown): string | null {
   }
   const code: unknown = body.code;
   return typeof code === 'string' ? code : null;
-}
-
-/** 从捕获的异常中取出可安全写入日志的错误名，不带 message，避免把上游返回的敏感内容写进日志 */
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'UnknownError';
 }
 
 /** 记录上游错误并返回对外的错误，日志只含步骤与状态码或错误名；对外抛哪个错误由 toError 决定 */

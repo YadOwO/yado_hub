@@ -12,7 +12,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 
 import { requireAuthIncludingDeleted } from '../../middleware/auth.js';
-import { accountVerificationRateLimit } from '../../middleware/rate-limit.js';
+import { accountSummaryRateLimit, accountVerificationRateLimit } from '../../middleware/rate-limit.js';
 import { createApp, jsonError } from '../../shared/openapi.js';
 import {
   AccountDeletionSchema,
@@ -56,7 +56,8 @@ const deleteAccountRoute = createRoute({
     '票据无效、已过期（10 分钟）或不属于当前用户返回 403 ACCOUNT_VERIFICATION_REQUIRED，App 应回到验证身份这一步。' +
     '第一步就把用户记入注销名单，之后该用户的旧 token 访问 hub 的其他接口一律 401。' +
     '任何一步失败返回 502 ACCOUNT_DELETION_FAILED（details.step 为失败的那一步），已完成的步骤可以重复执行，' +
-    'App 用同一个 token 和同一张票据（有效期内）直接重试即可（本接口不拦注销名单里的用户）；注销成功后票据作废，成功或重复调用都返回 200。' +
+    'App 用同一个 token 和同一张票据（有效期内）直接重试即可（本接口不拦注销名单里的用户）；' +
+    '注销成功返回 200，票据随即作废，之后再用同一张票据调用返回 403；中途失败时，在有效期内可以用同一张票据重试。' +
     '要串行等几个服务，最长约 50 秒，客户端超时要留够。',
   middleware: [requireAuthIncludingDeleted] as const,
   security: [{ Bearer: [] }],
@@ -134,12 +135,14 @@ const accountSummaryRoute = createRoute({
   description:
     '注销确认页用：并行调各产品后端与 AI 服务的只读汇总接口，每个服务最多等 10 秒，总时长约 10 秒。' +
     '某个服务失败或超时时，那一项的 status 为 unavailable，其余照常，整个接口仍返回 200；不影响注销。' +
-    '数量为 0 的项、查到了但没有任何项的服务不返回，所以 services 可能为空。只读，不改任何数据。',
-  middleware: [requireAuthIncludingDeleted] as const,
+    '数量为 0 的项、查到了但没有任何项的服务不返回，所以 services 可能为空。只读，不改任何数据。' +
+    '每个用户每分钟最多 10 次、每天 200 次，超出返回 429。',
+  middleware: [requireAuthIncludingDeleted, accountSummaryRateLimit] as const,
   security: [{ Bearer: [] }],
   responses: {
     200: { description: '各产品的数据量', content: { 'application/json': { schema: AccountSummarySchema } } },
     401: jsonError('未通过身份校验'),
+    429: jsonError('调用过于频繁，details.rule 为 per_minute 或 per_day'),
     500: jsonError('服务内部错误'),
   },
 });

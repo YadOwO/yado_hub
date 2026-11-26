@@ -128,7 +128,7 @@ agentd 用（机器凭证，不是 Logto 登录）：
 | 409 | `MESSAGE_ID_CONFLICT` | 消息 ID 已被其他对话使用，换新 ID 重发 |
 | 409 | `TICKET_NOT_LATEST` | 只能把最新一条反馈单改回待处理 |
 | 426 | `APP_UPGRADE_REQUIRED` | `DELETE /v1/account` 没带 `X-Account-Deletion-Ticket`（旧版 App），提示更新 |
-| 429 | `TOO_MANY_REQUESTS` | 发消息或注销前验证身份超过限流，`details.rule` 为 `per_minute` 或 `per_day` |
+| 429 | `TOO_MANY_REQUESTS` | 发消息、注销前验证身份或取注销前汇总超过限流，`details.rule` 为 `per_minute` 或 `per_day` |
 | 502 | `ACCOUNT_DELETION_FAILED` | 注销的某一步失败，`details.step` 是下游服务名或 `logto`；App 直接重试 |
 | 502 | `IDENTITY_VERIFICATION_UNAVAILABLE` | 注销前验证身份时调 Logto 失败（网络、超时、没预期的响应），可稍后重试 |
 | 502 | `DATA_LINK_UPSTREAM_FAILED` | 向来源后端取汇总失败、超过 5 秒或响应不合契约 |
@@ -142,6 +142,7 @@ agentd 用（机器凭证，不是 Logto 登录）：
 里同样的机器凭证，并行调各下游的只读接口 `GET {地址}/internal/v1/users/{userId}/summary`，每个下游 10 秒超时，总时长约 10 秒。
 某个下游失败或超时只把那一项标为 `unavailable`，不影响注销；数量为 0 的项和没有任何项的服务已被去掉。
 各下游返回的 key 固定：yado-ai 是 `points_balance`（剩余点数），yadoa-be 是 `synced_records`（同步的记录数），yadoi-be 是 `items`（物品件数）。
+取汇总会并行转调各下游，所以按用户限流：每个用户每分钟最多 10 次、每天最多 200 次，超出返回 429；额度单独一份，不和验证身份共用（共用的话，打开确认页会占掉试密码的次数），写在 `middleware/rate-limit.ts`。
 
 **验证身份**：拿着一个很久以前登录的 token 不能直接删账号，注销前必须先证明是本人，换一张 10 分钟有效的注销票据。
 `POST /v1/account/verification` 的请求体三选一：
