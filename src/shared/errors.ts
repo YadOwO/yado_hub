@@ -34,6 +34,12 @@ export const ErrorCode = {
   AppUpgradeRequired: 'APP_UPGRADE_REQUIRED',
   /** 服务端缺少必要配置，功能暂不可用 */
   ServiceNotConfigured: 'SERVICE_NOT_CONFIGURED',
+  /** 取联动汇总时用户还没授权（或已取消授权） */
+  DataLinkNotGranted: 'DATA_LINK_NOT_GRANTED',
+  /** 联动来源没有打开（DATA_LINK_SOURCES 里没有它），授权与取汇总都不可用 */
+  DataLinkUnavailable: 'DATA_LINK_UNAVAILABLE',
+  /** 向来源产品后端取汇总数失败：请求出错、超时或响应不合契约 */
+  DataLinkUpstreamFailed: 'DATA_LINK_UPSTREAM_FAILED',
   Internal: 'INTERNAL_ERROR',
 } as const;
 
@@ -95,7 +101,7 @@ export const ticketNotLatest = (): AppError =>
   new AppError(409, ErrorCode.TicketNotLatest, '只能把最新一条反馈单改回待处理');
 
 /**
- * 已通过鉴权的发消息请求在事务里发现用户已进注销名单时返回 403（注销与发消息同时发生）；
+ * 已通过鉴权的发消息、数据联动授权请求在事务里发现用户已进注销名单时返回 403（注销与它们同时发生）；
  * 注销之后的新请求在鉴权时就返回 401，到不了这里。
  */
 export const accountDeleted = (): AppError => new AppError(403, ErrorCode.AccountDeleted, '账号已注销');
@@ -147,6 +153,23 @@ export const appUpgradeRequired = (): AppError =>
 /** 注销账号所需的配置（Logto M2M 凭证或下游服务列表）缺失时返回 503 */
 export const serviceNotConfigured = (): AppError =>
   new AppError(503, ErrorCode.ServiceNotConfigured, '注销服务尚未配置');
+
+/** 取联动汇总时用户没有授权返回 403；App 应引导用户先授权 */
+export const dataLinkNotGranted = (): AppError =>
+  new AppError(403, ErrorCode.DataLinkNotGranted, '尚未授权数据联动');
+
+/** 联动来源没有打开返回 404；此时授权与取汇总都不可用，取消授权不受影响 */
+export const dataLinkUnavailable = (): AppError =>
+  new AppError(404, ErrorCode.DataLinkUnavailable, '数据联动暂不可用');
+
+/** 向来源产品后端取汇总数失败（请求出错、超时或响应不合契约）时返回 502；message 不带内部地址 */
+export const dataLinkUpstreamFailed = (): AppError =>
+  new AppError(502, ErrorCode.DataLinkUpstreamFailed, '获取联动数据失败，请稍后重试');
+
+/** 从捕获的异常中取出可安全写入日志的错误名，不带 message（message 里可能有地址等内部细节） */
+export function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : 'UnknownError';
+}
 
 /** 全局错误处理输出的标准 JSON 结构 */
 interface IErrorBody {

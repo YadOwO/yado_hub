@@ -10,7 +10,8 @@
 import { z } from '@hono/zod-openapi';
 
 import type { IDownstreamService } from '../../config/account-deletion.js';
-import { INTERNAL_USERS_PATH, errorName } from './deletion.js';
+import { errorName } from '../../shared/errors.js';
+import { INTERNAL_USERS_PATH } from './deletion.js';
 
 /**
  * 每个下游服务汇总接口的超时（毫秒）。

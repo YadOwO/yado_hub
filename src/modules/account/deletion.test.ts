@@ -50,6 +50,11 @@ class FakeSteps implements IAccountDeletionSteps {
     return Promise.resolve(2);
   }
 
+  deleteDataLinks(userId: string): Promise<number> {
+    this.record(`dataLinks:${userId}`);
+    return Promise.resolve(1);
+  }
+
   deleteFromService(service: IDownstreamService, userId: string): Promise<void> {
     this.record(`${service.name}:${userId}`);
     return Promise.resolve();
@@ -86,12 +91,13 @@ describe('deleteAccountEverywhere', () => {
     mock.restoreAll();
   });
 
-  it('按顺序执行：注销名单 → 意见反馈 → 各下游服务 → Logto → 记下完成', async () => {
+  it('按顺序执行：注销名单 → 意见反馈 → 数据联动授权 → 各下游服务 → Logto → 记下完成', async () => {
     const steps = new FakeSteps();
     await deleteAccountEverywhere('u1', FULL_PLAN, steps);
     assert.deepEqual(steps.calls, [
       'markDeleted:u1',
       'feedback:u1',
+      'dataLinks:u1',
       'yado-ai:u1',
       'yadoa-be:u1',
       'yadoi-be:u1',
@@ -103,19 +109,31 @@ describe('deleteAccountEverywhere', () => {
   it('开发态免鉴权的计划不删 Logto 用户', async () => {
     const steps = new FakeSteps();
     await deleteAccountEverywhere('dev', { services: SERVICES.slice(0, 1), shouldDeleteLogtoUser: false }, steps);
-    assert.deepEqual(steps.calls, ['markDeleted:dev', 'feedback:dev', 'yado-ai:dev', 'completed:dev']);
+    assert.deepEqual(steps.calls, [
+      'markDeleted:dev',
+      'feedback:dev',
+      'dataLinks:dev',
+      'yado-ai:dev',
+      'completed:dev',
+    ]);
   });
 
   it('中间一个下游服务失败：原样抛出，后面的服务、Logto 与完成标记都不执行', async () => {
     const steps = new FakeSteps('yadoa-be:u1');
     await assert.rejects(deleteAccountEverywhere('u1', FULL_PLAN, steps), (error) => error === steps.error);
-    assert.deepEqual(steps.calls, ['markDeleted:u1', 'feedback:u1', 'yado-ai:u1', 'yadoa-be:u1']);
+    assert.deepEqual(steps.calls, ['markDeleted:u1', 'feedback:u1', 'dataLinks:u1', 'yado-ai:u1', 'yadoa-be:u1']);
   });
 
-  it('删意见反馈失败：不调任何下游服务', async () => {
+  it('删意见反馈失败：不删联动授权，也不调任何下游服务', async () => {
     const steps = new FakeSteps('feedback:u1', new Error('数据库不可用'));
     await assert.rejects(deleteAccountEverywhere('u1', FULL_PLAN, steps), (error) => error === steps.error);
     assert.deepEqual(steps.calls, ['markDeleted:u1', 'feedback:u1']);
+  });
+
+  it('删联动授权失败：后面的下游服务、Logto 与完成标记都不执行', async () => {
+    const steps = new FakeSteps('dataLinks:u1', new Error('数据库不可用'));
+    await assert.rejects(deleteAccountEverywhere('u1', FULL_PLAN, steps), (error) => error === steps.error);
+    assert.deepEqual(steps.calls, ['markDeleted:u1', 'feedback:u1', 'dataLinks:u1']);
   });
 
   it('写注销名单失败：什么都不删', async () => {

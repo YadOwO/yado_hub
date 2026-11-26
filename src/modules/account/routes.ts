@@ -4,7 +4,7 @@
  * - GET /summary：注销前各产品的数据量汇总（并行调各下游，见 summary.ts）；
  * - POST /verification/email-code：把验证码发到 Logto 里这个账号的主邮箱；
  * - POST /verification：验证身份（密码、邮箱验证码或重新登录的 ID token），通过后发 10 分钟有效的注销票据（见 verification.ts）；
- * - DELETE /：注销。必须带票据（X-Account-Deletion-Ticket），hub 统一编排：写注销名单 → 删意见反馈 →
+ * - DELETE /：注销。必须带票据（X-Account-Deletion-Ticket），hub 统一编排：写注销名单 → 删意见反馈 → 删数据联动授权 →
  *   依次调各下游服务的内部删除接口 → 删 Logto 用户，步骤见 deletion.ts。只删除当前用户自己的数据。
  *
  * 这几个接口都用 requireAuthIncludingDeleted：注销中途失败的用户已经在注销名单里，要能重新验证身份并重试。
@@ -49,7 +49,7 @@ const deleteAccountRoute = createRoute({
   tags: ['account'],
   summary: '注销账号',
   description:
-    '永久注销芽豆账号：删除当前用户在所有芽豆产品下的意见反馈（反馈单只留不含用户与正文的匿名统计），' +
+    '永久注销芽豆账号：删除当前用户在所有芽豆产品下的意见反馈（反馈单只留不含用户与正文的匿名统计）和数据联动授权记录，' +
     '再依次让各产品后端与 AI 服务删除这个用户的数据，全部成功后删除 Logto 用户，之后所有芽豆 App 都无法再用它登录。' +
     '必须先验证身份：调 POST /v1/account/verification 换取注销票据，放进请求头 X-Account-Deletion-Ticket；' +
     '不带这个头返回 426 APP_UPGRADE_REQUIRED（旧版 App 不认识验证身份这一步），' +

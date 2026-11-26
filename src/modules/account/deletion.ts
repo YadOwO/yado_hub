@@ -1,14 +1,15 @@
 /**
  * 注销账号的编排：所有芽豆 App 共用一个 Logto 账号，注销统一由 hub 删完各服务的数据，最后删 Logto 用户。
  *
- * 顺序：写注销名单 → 删 hub 自己的意见反馈 → 按配置顺序调各下游服务的内部删除接口 → 删 Logto 用户 → 记下已完成。
+ * 顺序：注销名单 → 意见反馈 → 数据联动授权 → 下游服务 → Logto → 记下已完成。
+ * 即：写注销名单 → 删 hub 自己的意见反馈 → 删数据联动授权记录 → 按配置顺序调各下游服务的内部删除接口 → 删 Logto 用户。
  * 任何一步失败立即抛出，后面的步骤都不执行；每一步都可以重复执行，App 重试时从头再走一遍。
  * Logto 用户放在最后删：删了之后 App 就拿不到新 token，也就没法再重试。
  *
  * 本文件不依赖数据库与环境变量（只做类型引用），数据库与配置由调用方通过参数传入，方便单独测试。
  */
 import type { IDownstreamService } from '../../config/account-deletion.js';
-import { accountDeletionFailed, serviceNotConfigured } from '../../shared/errors.js';
+import { accountDeletionFailed, errorName, serviceNotConfigured } from '../../shared/errors.js';
 
 /**
  * 每个下游服务删除接口的超时（毫秒）。
@@ -46,6 +47,8 @@ export interface IAccountDeletionSteps {
   markUserDeleted(userId: string): Promise<void>;
   /** 删除用户在所有产品下的意见反馈，返回删除的对话数 */
   deleteFeedback(userId: string): Promise<number>;
+  /** 物理删除用户的数据联动授权记录，返回删除的行数 */
+  deleteDataLinks(userId: string): Promise<number>;
   /** 调一个下游服务删除这个用户的数据；失败抛 502 ACCOUNT_DELETION_FAILED */
   deleteFromService(service: IDownstreamService, userId: string): Promise<void>;
   /** 删除 Logto 用户；已删过（404）算成功 */
@@ -96,6 +99,10 @@ export async function deleteAccountEverywhere(
   const conversationCount = await steps.deleteFeedback(userId);
   logStep({ userId, step: 'feedback', conversationCount, ms: Date.now() - stepStartedAt });
 
+  stepStartedAt = Date.now();
+  const linkCount = await steps.deleteDataLinks(userId);
+  logStep({ userId, step: 'data_links', linkCount, ms: Date.now() - stepStartedAt });
+
   for (const service of plan.services) {
     stepStartedAt = Date.now();
     await steps.deleteFromService(service, userId);
@@ -118,11 +125,6 @@ export interface IDownstreamDeletionOptions {
   fetch?: typeof fetch;
   /** 超时（毫秒），默认 DOWNSTREAM_DELETION_TIMEOUT_MS */
   timeoutMs?: number;
-}
-
-/** 从捕获的异常中取出可安全写入日志的错误名，不带 message；删除与汇总（summary.ts）共用 */
-export function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'UnknownError';
 }
 
 /**

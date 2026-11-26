@@ -119,3 +119,16 @@ export const accountVerificationRateLimit = createUserRateLimit(
   ACCOUNT_VERIFICATION_RATE_LIMIT_PER_MINUTE,
   ACCOUNT_VERIFICATION_RATE_LIMIT_PER_DAY,
 );
+
+/**
+ * 数据联动接口每个用户每分钟最多调用的次数。
+ * App 在账户页出现与下拉刷新时才取汇总（距上次成功不到 5 分钟不再取），正常使用远低于此；
+ * 上限主要防脚本循环调用，因为取汇总会转调来源产品的后端。
+ */
+const DATA_LINK_RATE_LIMIT_PER_MINUTE = 60;
+
+/** 数据联动接口每个用户每天最多调用的次数 */
+const DATA_LINK_RATE_LIMIT_PER_DAY = 3000;
+
+/** 限制用户调用数据联动接口（列出、授权、取消、取汇总共用一份额度）的频率 */
+export const dataLinkRateLimit = createUserRateLimit(DATA_LINK_RATE_LIMIT_PER_MINUTE, DATA_LINK_RATE_LIMIT_PER_DAY);
